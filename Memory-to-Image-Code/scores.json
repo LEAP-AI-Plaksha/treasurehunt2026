@@ -1,0 +1,98 @@
+[
+  {
+    "team_name": "alpha",
+    "timestamp": "2026-08-14T19:21:07.139394+00:00",
+    "left_similarity": 0.0,
+    "right_similarity": 0.0,
+    "left_score": 0,
+    "right_score": 0,
+    "total_score": 0,
+    "max_score": 20
+  },
+  {
+    "team_name": "alpha",
+    "timestamp": "2026-08-14T19:28:34.576301+00:00",
+    "left_similarity": 0.0,
+    "right_similarity": 0.0,
+    "left_score": 0,
+    "right_score": 0,
+    "total_score": 0,
+    "max_score": 20
+  },
+  {
+    "team_name": "alpha",
+    "timestamp": "2026-08-15T07:22:50.287866+00:00",
+    "left_similarity": 0.8383,
+    "right_similarity": 0.8816,
+    "left_score": 7,
+    "right_score": 8,
+    "total_score": 15,
+    "max_score": 20
+  },
+  {
+    "team_name": "alpha",
+    "timestamp": "2026-08-15T07:38:00.058550+00:00",
+    "left_similarity": 0.7741,
+    "right_similarity": 0.9461,
+    "left_score": 6,
+    "right_score": 10,
+    "total_score": 16,
+    "max_score": 20
+  },
+  {
+    "team_name": "bravo",
+    "timestamp": "2026-08-15T12:56:19.632330+00:00",
+    "left": {
+      "content": 0.8574,
+      "structure": 0.1555,
+      "color": 0.6726,
+      "combined": 0.5655,
+      "content_pct": 85.7,
+      "structure_pct": 15.5,
+      "color_pct": 67.3,
+      "combined_pct": 56.6,
+      "score": 5
+    },
+    "right": {
+      "content": 0.8098,
+      "structure": 0.2001,
+      "color": 0.7136,
+      "combined": 0.5724,
+      "content_pct": 81.0,
+      "structure_pct": 20.0,
+      "color_pct": 71.4,
+      "combined_pct": 57.2,
+      "score": 5
+    },
+    "total_score": 10,
+    "max_score": 20
+  },
+  {
+    "team_name": "alpha",
+    "timestamp": "2026-08-15T13:40:12.023009+00:00",
+    "left": {
+      "content": 0.7917,
+      "structure": 0.0851,
+      "color": 0.5459,
+      "combined": 0.483,
+      "content_pct": 79.2,
+      "structure_pct": 8.5,
+      "color_pct": 54.6,
+      "combined_pct": 48.3,
+      "score": 4
+    },
+    "right": {
+      "content": 0.899,
+      "structure": 0.1239,
+      "color": 0.6183,
+      "combined": 0.5575,
+      "content_pct": 89.9,
+      "structure_pct": 12.4,
+      "color_pct": 61.8,
+      "combined_pct": 55.8,
+      "score": 5
+    },
+    "total_score": 9,
+    "max_score": 20
+  }
+]

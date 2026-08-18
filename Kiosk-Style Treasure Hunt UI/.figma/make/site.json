@@ -1,0 +1,10 @@
+{
+  "description": "Engage teams in an immersive treasure hunt experience with a secure, kiosk-style interface that features distinct challenges and strict authentication.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

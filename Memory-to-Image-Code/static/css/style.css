@@ -1,0 +1,551 @@
+/* ===================================================
+   Memory to Image — Treasure Hunt
+   Dark cinematic theme · Amber/gold accents
+   =================================================== */
+
+/* ---------- RESET & BASE ---------- */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  background-color: #0a0a0f;
+  color: #f0f0f5;
+  min-height: 100vh;
+  overflow: hidden;
+  /* subtle radial gradient to break up the flat feel */
+  background-image:
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(30, 28, 45, 0.55) 0%, transparent 70%),
+    radial-gradient(circle at 80% 90%, rgba(20, 18, 35, 0.45) 0%, transparent 50%);
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+/* ---------- SCREENS ---------- */
+.screen {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 1;
+}
+
+.screen.active {
+  display: flex;
+  opacity: 1;
+}
+
+.screen-inner {
+  width: 100%;
+  max-width: 960px;
+  padding: 2rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/* ---------- TYPOGRAPHY ---------- */
+.game-title {
+  font-size: 3rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #f0f0f5;
+  margin-bottom: 0.25rem;
+  line-height: 1.1;
+}
+
+.game-subtitle {
+  font-size: 1.1rem;
+  font-weight: 400;
+  color: #8888a0;
+  margin-bottom: 2.5rem;
+  letter-spacing: 0.06em;
+}
+
+.screen-instruction {
+  font-size: 1.05rem;
+  color: #b0b0c0;
+  margin-bottom: 1.75rem;
+  line-height: 1.5;
+}
+
+/* ---------- LOGIN CARD ---------- */
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.form-group {
+  width: 100%;
+  margin-bottom: 1.15rem;
+  text-align: left;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #8888a0;
+  margin-bottom: 0.4rem;
+  letter-spacing: 0.04em;
+}
+
+/* ---------- INPUTS & TEXTAREAS ---------- */
+input[type="text"],
+input[type="password"],
+textarea {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 0.95rem;
+  color: #f0f0f5;
+  background: #1a1a2e;
+  border: 1px solid #2a2a3e;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+input[type="text"]::placeholder,
+input[type="password"]::placeholder,
+textarea::placeholder {
+  color: #55556a;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+textarea:focus {
+  border-color: #e09f1f;
+  box-shadow: 0 0 0 3px rgba(224, 159, 31, 0.15);
+}
+
+textarea {
+  min-height: 150px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+/* ---------- BUTTONS ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  padding: 0.8rem 2.4rem;
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-primary {
+  background-color: #e09f1f;
+  color: #0a0a0f;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #f0b429;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 18px rgba(240, 180, 41, 0.25);
+}
+
+/* ---------- ERROR MESSAGE ---------- */
+.error-message {
+  color: #f05a5a;
+  font-size: 0.88rem;
+  min-height: 1.3em;
+  margin-top: 0.75rem;
+}
+
+/* ---------- TIMER ---------- */
+.timer {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 4.5rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: #f0f0f5;
+  margin-bottom: 1rem;
+  text-shadow: 0 0 20px rgba(240, 240, 245, 0.12);
+  transition: color 0.4s ease, text-shadow 0.4s ease;
+}
+
+.timer.warning {
+  color: #f0b429;
+  text-shadow: 0 0 24px rgba(240, 180, 41, 0.2);
+}
+
+.timer.critical {
+  color: #e85454;
+  text-shadow: 0 0 28px rgba(232, 84, 84, 0.25);
+}
+
+/* ---------- IMAGES SCREEN ---------- */
+.images-grid {
+  display: flex;
+  gap: 2rem;
+  justify-content: center;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.image-card {
+  flex: 1;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.image-card img {
+  width: 100%;
+  max-height: 52vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  background: #12121a;
+}
+
+.image-label {
+  font-size: 0.85rem;
+  color: #8888a0;
+  margin-top: 0.65rem;
+  letter-spacing: 0.04em;
+}
+
+/* ---------- SWITCH SCREEN ---------- */
+.switch-title {
+  font-size: 5rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: #f0b429;
+  margin-bottom: 1.25rem;
+}
+
+.switch-instruction {
+  font-size: 1.1rem;
+  color: #b0b0c0;
+  line-height: 1.7;
+  margin-bottom: 2.5rem;
+}
+
+/* ---------- PROMPT SCREEN ---------- */
+.prompts-grid {
+  display: flex;
+  gap: 2rem;
+  width: 100%;
+  margin-bottom: 1.5rem;
+}
+
+.prompt-section {
+  flex: 1;
+  text-align: left;
+}
+
+.prompt-label {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #c8c8d8;
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.03em;
+}
+
+.note-text {
+  font-size: 0.82rem;
+  color: #6a6a80;
+  margin-top: 0.8rem;
+}
+
+#btn-submit-prompts {
+  margin-top: 0.25rem;
+}
+
+/* ---------- LOADING SCREEN ---------- */
+.spinner {
+  width: 56px;
+  height: 56px;
+  border: 4px solid #2a2a3e;
+  border-top-color: #e09f1f;
+  border-radius: 50%;
+  animation: spin 0.85s linear infinite;
+  margin-bottom: 2rem;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #f0f0f5;
+  margin-bottom: 0.5rem;
+}
+
+.loading-sub {
+  font-size: 0.95rem;
+  color: #8888a0;
+}
+
+/* ---------- SCORE / RESULTS SCREEN ---------- */
+.results-title {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  margin-bottom: 2rem;
+  color: #f0f0f5;
+}
+
+.results-grid {
+  display: flex;
+  gap: 3rem;
+  justify-content: center;
+  width: 100%;
+  margin-bottom: 2rem;
+}
+
+.result-column {
+  flex: 1;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.result-pair {
+  display: flex;
+  gap: 1rem;
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+.result-image-block {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.result-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8888a0;
+  margin-bottom: 0.45rem;
+}
+
+.result-image-block img {
+  width: 100%;
+  max-height: 28vh;
+  object-fit: contain;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  background: #12121a;
+}
+
+.result-stats {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.similarity-pct {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 2.2rem;
+  font-weight: 500;
+}
+
+/* Score color coding */
+.similarity-pct.high   { color: #4cce5c; }
+.similarity-pct.medium { color: #f0b429; }
+.similarity-pct.low    { color: #e85454; }
+
+.score-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1rem;
+  font-weight: 500;
+  background: #1e1e30;
+  color: #d0d0e0;
+  padding: 0.35rem 0.85rem;
+  border-radius: 6px;
+}
+
+.total-score-block {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.total-label {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #8888a0;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.total-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 3rem;
+  font-weight: 700;
+  color: #f0b429;
+}
+
+.team-display {
+  font-size: 0.9rem;
+  color: #6a6a80;
+  letter-spacing: 0.04em;
+}
+
+/* ---------- RESPONSIVE ---------- */
+@media (max-width: 768px) {
+  .game-title {
+    font-size: 2rem;
+  }
+
+  .timer {
+    font-size: 3rem;
+  }
+
+  .images-grid,
+  .prompts-grid,
+  .results-grid {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .image-card,
+  .prompt-section,
+  .result-column {
+    max-width: 100%;
+  }
+
+  .image-card img {
+    max-height: 35vh;
+  }
+
+  .switch-title {
+    font-size: 3.5rem;
+  }
+
+  .result-pair {
+    flex-direction: column;
+  }
+
+  .result-image-block img {
+    max-height: 22vh;
+  }
+
+  .similarity-pct {
+    font-size: 1.6rem;
+  }
+
+  .total-value {
+    font-size: 2.2rem;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .screen-inner {
+    max-width: 840px;
+  }
+}
+
+/* ---------- SCORE BREAKDOWN BARS ---------- */
+
+.score-breakdown {
+  width: 100%;
+  margin: 0.75rem 0;
+  padding: 0.6rem 0.8rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+}
+
+.breakdown-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.45rem;
+}
+
+.breakdown-row:last-child {
+  margin-bottom: 0;
+}
+
+.breakdown-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #bbb;
+  min-width: 90px;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+}
+
+.breakdown-bar-track {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.breakdown-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.1s linear;
+}
+
+/* Per-metric bar colors */
+.content-bar {
+  background: linear-gradient(90deg, #4a9eff, #2d7dd2);
+}
+
+.structure-bar {
+  background: linear-gradient(90deg, #e09f1f, #c88a15);
+}
+
+.color-bar {
+  background: linear-gradient(90deg, #e06090, #c44070);
+}
+
+.breakdown-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #ccc;
+  min-width: 36px;
+  text-align: right;
+}

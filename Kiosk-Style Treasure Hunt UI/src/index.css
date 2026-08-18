@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Digital+Numbers&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import 'tailwindcss';
+
+* { box-sizing: border-box; }
+
+:root {
+  --bg: #000307;
+  --blue: #337DFF;
+  --blue-light: #669EFF;
+  --blue-dark: #0331BA;
+  --blue-mid: #044AC5;
+  --red: #FF3333;
+  --amber: #FFAA00;
+  --green: #00FF88;
+}
+
+body {
+  background: var(--bg);
+  color: white;
+  font-family: 'Inter', sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+::-webkit-scrollbar { display: none; }
+
+/* Subtle scanline animation for the idle flicker effect only */
+@keyframes flicker {
+  0%, 100% { opacity: 1; }
+  92% { opacity: 1; }
+  93% { opacity: 0.85; }
+  94% { opacity: 1; }
+  96% { opacity: 0.92; }
+  97% { opacity: 1; }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.font-digital { font-family: 'Digital Numbers', monospace; }
+.font-mono { font-family: 'JetBrains Mono', monospace; }
+
+/* Clean scanline texture - subtle, no animation */
+.scanline::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.05) 2px,
+    rgba(0,0,0,0.05) 4px
+  );
+  pointer-events: none;
+  z-index: 50;
+}
+
+/* Minimal accent classes - no heavy box shadows or text shadows */
+.border-accent { border-color: var(--blue); }
+.text-accent { color: var(--blue-light); }
+
+/* Status indicator pulse - restrained, just opacity */
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-status-pulse { animation: status-pulse 2s ease-in-out infinite; }
+.animate-flicker { animation: flicker 10s ease-in-out infinite; }
+.animate-blink { animation: blink 1s step-end infinite; }

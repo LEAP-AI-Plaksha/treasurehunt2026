@@ -1,0 +1,146 @@
+{
+  "system": {
+    "eventName": "TREASURE by LEAP - A Louvre Heist",
+    "globalMaxAttempts": 3,
+    "sessionTimeoutSeconds": 3600,
+    "corsAllowedOrigins": [
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "http://localhost:5175",
+      "http://localhost:5176",
+      "http://localhost:5177",
+      "http://127.0.0.1:5173",
+      "http://127.0.0.1:5174",
+      "http://127.0.0.1:5175",
+      "http://127.0.0.1:5176",
+      "http://127.0.0.1:5177"
+    ]
+  },
+  "auth": {
+    "teams": [
+      {
+        "teamId": "ALPHA",
+        "passcode": "louvre01",
+        "name": "Team Alpha"
+      },
+      {
+        "teamId": "BETA",
+        "passcode": "heist02",
+        "name": "Team Beta"
+      },
+      {
+        "teamId": "GAMMA",
+        "passcode": "museum03",
+        "name": "Team Gamma"
+      },
+      {
+        "teamId": "DELTA",
+        "passcode": "artifact04",
+        "name": "Team Delta"
+      },
+      {
+        "teamId": "OMEGA",
+        "passcode": "plaksha2024",
+        "name": "Team Omega"
+      }
+    ]
+  },
+  "rooms": {
+    "YOGA_ROOM": {
+      "port": 5173,
+      "terminalId": "ALPHA-01",
+      "label": "LASER GRID",
+      "coordinates": {
+        "lat": "48.8606 N",
+        "lng": "2.3376 E"
+      },
+      "briefing": "The Louvre east wing laser grid pulses at irregular intervals. Your team must hold the deactivation pose for exactly 10 seconds without breaking contact. Triggering early or moving out of frame will trip the alarm.",
+      "hint": "Hold the DEACTIVATE button for exactly 10 seconds. Release at the tone.",
+      "correctAnswer": null,
+      "successClue": "CLUE: The Mona Lisa hangs 47 paces north. The third panel from the left conceals the keycard.",
+      "points": 150,
+      "timerSeconds": 10,
+      "maxAttempts": 3
+    },
+    "CTLC_LAB": {
+      "port": 5174,
+      "terminalId": "BETA-02",
+      "label": "SILENT RELAY",
+      "coordinates": {
+        "lat": "48.8608 N",
+        "lng": "2.3364 E"
+      },
+      "briefing": "The guard rotation has been intercepted. A silent communication channel has been established with your inside contact. The target phrase must be memorised and relayed without speaking - facial recognition microphones are active.",
+      "hint": "Hold REVEAL PHRASE to view your target message. Memorise it - the display clears in 5 seconds.",
+      "correctAnswer": "ARTEMIS PROTOCOL SEVEN",
+      "successClue": "CLUE: Access Level 4 requires vocal signature. Audio file uploaded to terminal H2-LOUNGE.",
+      "points": 120,
+      "timerSeconds": 5,
+      "maxAttempts": 3
+    },
+    "MUSIC_ROOM": {
+      "port": 5175,
+      "terminalId": "GAMMA-03",
+      "label": "VOICE INTERCEPT",
+      "coordinates": {
+        "lat": "48.8612 N",
+        "lng": "2.3352 E"
+      },
+      "briefing": "An intercepted transmission is incoming on the guard frequency. Identify whether the voice on the channel is a human guard or an AI decoy before you respond - one wrong move compromises the entire operation.",
+      "hint": "Analyse the incoming transmission. Is it a Human guard or an AI decoy system?",
+      "correctAnswer": "AI",
+      "successClue": "CLUE: The decoy is running on NODE-7. Disable it via the server room panel - code 4471.",
+      "points": 130,
+      "timerSeconds": 30,
+      "maxAttempts": 3
+    },
+    "H2_LOUNGE": {
+      "port": 5176,
+      "terminalId": "DELTA-04",
+      "label": "MEMORY FORGERY",
+      "coordinates": {
+        "lat": "48.8619 N",
+        "lng": "2.3341 E"
+      },
+      "briefing": "Your asset inside the museum photographed the target artefact. The classified image will self-destruct after 10 seconds. Study every detail to construct an accurate description for the forger.",
+      "hint": "Memorise the artifact in 10 seconds. Describe shapes, materials, and distinct engravings.",
+      "correctAnswer": null,
+      "successClue": "CLUE: The forger workshop is in Sub-Level B, behind the restoration studio. Passcode: VENUS.",
+      "points": 140,
+      "timerSeconds": 10,
+      "maxAttempts": 3
+    },
+    "CLASSROOM_1101": {
+      "port": 5177,
+      "terminalId": "EPSILON-05",
+      "label": "NEURAL BYPASS",
+      "coordinates": {
+        "lat": "48.8621 N",
+        "lng": "2.3338 E"
+      },
+      "briefing": "The museum neural network authentication system must be bypassed. Your team cryptographer has isolated the vulnerable weights layer. Submit the correct backpropagation values to inject your bypass signature.",
+      "hint": "Input the correct weight values for each layer node. The gradient descent target is 0.001.",
+      "correctAnswer": "0.73,0.12,0.89,0.44",
+      "successClue": "CLUE: Authentication bypass confirmed. Emergency exit C is now unlocked for 120 seconds.",
+      "points": 160,
+      "timerSeconds": 120,
+      "maxAttempts": 3
+    },
+    "NOSE_DRAW": {
+      "port": 5178,
+      "terminalId": "ZETA-06",
+      "label": "BIOMETRIC SKETCH",
+      "coordinates": {
+        "lat": "48.8625 N",
+        "lng": "2.3329 E"
+      },
+      "briefing": "The final biometric scanner requires a physical sketch of the guard captain face - drawn using only your nose. This unconventional method bypasses motion-detection cameras watching your hands.",
+      "hint": "Hold your sketch up to the camera or describe what you drew to validate against the target profile.",
+      "correctAnswer": null,
+      "successClue": "CLUE: Biometric match confirmed. Vault access granted. Extraction window opens in 3 minutes.",
+      "points": 100,
+      "timerSeconds": 300,
+      "maxAttempts": 3
+    }
+  }
+}

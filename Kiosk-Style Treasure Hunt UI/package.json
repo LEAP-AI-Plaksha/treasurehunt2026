@@ -1,0 +1,34 @@
+{
+  "name": "heist-kiosk-ui",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "dev:yoga":      "cross-env VITE_ROOM_ID=YOGA_ROOM      VITE_PORT=5173 vite --host 0.0.0.0",
+    "dev:ctlc":      "cross-env VITE_ROOM_ID=CTLC_LAB       VITE_PORT=5174 vite --host 0.0.0.0",
+    "dev:music":     "cross-env VITE_ROOM_ID=MUSIC_ROOM     VITE_PORT=5175 vite --host 0.0.0.0",
+    "dev:h2":        "cross-env VITE_ROOM_ID=H2_LOUNGE      VITE_PORT=5176 vite --host 0.0.0.0",
+    "dev:classroom": "cross-env VITE_ROOM_ID=CLASSROOM_1101 VITE_PORT=5177 vite --host 0.0.0.0",
+    "dev:nosedraw":  "cross-env VITE_ROOM_ID=NOSE_DRAW      VITE_PORT=5178 vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview",
+    "format": "oxfmt"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.0",
+    "cross-env": "^7.0.3",
+    "tailwindcss": "^4.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "oxfmt": "^0.2.0",
+    "typescript": "^5.7.0",
+    "vite": "^8.0.0"
+  }
+}

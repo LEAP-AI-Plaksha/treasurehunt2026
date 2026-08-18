@@ -1,0 +1,10 @@
+flask
+flask-cors
+python-dotenv
+requests
+torch
+torchvision
+transformers
+Pillow
+scikit-image
+numpy

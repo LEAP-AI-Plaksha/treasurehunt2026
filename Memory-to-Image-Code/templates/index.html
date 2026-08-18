@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Memory to Image — Treasure Hunt</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- ============ SCREEN 1: LOGIN ============ -->
+  <div id="screen-login" class="screen active">
+    <div class="screen-inner">
+      <div class="login-card">
+        <h1 id="game-title" class="game-title">MEMORY TO IMAGE</h1>
+        <p class="game-subtitle">Treasure Hunt Challenge</p>
+
+        <div class="form-group">
+          <label for="input-team-name">Team Name</label>
+          <input
+            type="text"
+            id="input-team-name"
+            placeholder="Enter your team name"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="input-password">Password</label>
+          <input
+            type="password"
+            id="input-password"
+            placeholder="Enter password"
+          />
+        </div>
+
+        <button id="btn-login" class="btn btn-primary">Login</button>
+
+        <p id="login-error" class="error-message" role="alert"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SCREEN 2: IMAGE DISPLAY ============ -->
+  <div id="screen-images" class="screen">
+    <div class="screen-inner">
+      <div id="images-timer" class="timer">00:10</div>
+
+      <p class="screen-instruction">Memorize these images!</p>
+
+      <div class="images-grid">
+        <div class="image-card">
+          <img id="img-display-1" src="" alt="Image 1" />
+          <span class="image-label">Image 1</span>
+        </div>
+        <div class="image-card">
+          <img id="img-display-2" src="" alt="Image 2" />
+          <span class="image-label">Image 2</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SCREEN 3: SWITCH PLAYERS ============ -->
+  <div id="screen-switch" class="screen">
+    <div class="screen-inner">
+      <h1 class="switch-title">SWITCH!</h1>
+      <p class="switch-instruction">
+        The other team member takes the laptop now.<br />
+        Discuss what you saw, then click Ready.
+      </p>
+      <button id="btn-ready" class="btn btn-primary">Ready</button>
+    </div>
+  </div>
+
+  <!-- ============ SCREEN 4: PROMPT WRITING ============ -->
+  <div id="screen-prompt" class="screen">
+    <div class="screen-inner">
+      <div id="prompt-timer" class="timer">01:00</div>
+
+      <p class="screen-instruction">
+        Describe the images you saw. Write prompts to recreate them.
+      </p>
+
+      <div class="prompts-grid">
+        <div class="prompt-section">
+          <label for="textarea-prompt-1" class="prompt-label">Image 1 Prompt</label>
+          <textarea
+            id="textarea-prompt-1"
+            placeholder="Describe the first image in detail…"
+            spellcheck="true"
+          ></textarea>
+        </div>
+        <div class="prompt-section">
+          <label for="textarea-prompt-2" class="prompt-label">Image 2 Prompt</label>
+          <textarea
+            id="textarea-prompt-2"
+            placeholder="Describe the second image in detail…"
+            spellcheck="true"
+          ></textarea>
+        </div>
+      </div>
+
+      <button id="btn-submit-prompts" class="btn btn-primary">Generate Images</button>
+
+      <p class="note-text">Your prompts will be sent to an AI to recreate the images</p>
+      <p id="prompt-error" class="error-message" role="alert"></p>
+    </div>
+  </div>
+
+  <!-- ============ SCREEN 5: LOADING ============ -->
+  <div id="screen-loading" class="screen">
+    <div class="screen-inner">
+      <div class="spinner" aria-label="Loading"></div>
+      <h2 class="loading-title">Generating your images…</h2>
+      <p class="loading-sub">Our AI is recreating the images from your descriptions</p>
+    </div>
+  </div>
+
+  <!-- ============ SCREEN 6: SCORE / RESULTS ============ -->
+  <div id="screen-score" class="screen">
+    <div class="screen-inner">
+      <h1 class="results-title">YOUR RESULTS</h1>
+
+      <div class="results-grid">
+        <!-- Column 1 -->
+        <div class="result-column">
+          <div class="result-pair">
+            <div class="result-image-block">
+              <span class="result-label">Original</span>
+              <img id="img-original-1" src="" alt="Original image 1" />
+            </div>
+            <div class="result-image-block">
+              <span class="result-label">Generated</span>
+              <img id="img-generated-1" src="" alt="Generated image 1" />
+            </div>
+          </div>
+
+          <div class="score-breakdown" id="breakdown-1">
+            <div class="breakdown-row">
+              <span class="breakdown-label">Content</span>
+              <div class="breakdown-bar-track">
+                <div class="breakdown-bar-fill content-bar" id="bar-content-1" style="width: 0%"></div>
+              </div>
+              <span class="breakdown-value" id="val-content-1">0%</span>
+            </div>
+            <div class="breakdown-row">
+              <span class="breakdown-label">Structure</span>
+              <div class="breakdown-bar-track">
+                <div class="breakdown-bar-fill structure-bar" id="bar-structure-1" style="width: 0%"></div>
+              </div>
+              <span class="breakdown-value" id="val-structure-1">0%</span>
+            </div>
+            <div class="breakdown-row">
+              <span class="breakdown-label">Colors</span>
+              <div class="breakdown-bar-track">
+                <div class="breakdown-bar-fill color-bar" id="bar-color-1" style="width: 0%"></div>
+              </div>
+              <span class="breakdown-value" id="val-color-1">0%</span>
+            </div>
+          </div>
+
+          <div class="result-stats">
+            <span id="similarity-1" class="similarity-pct">0%</span>
+            <span id="score-badge-1" class="score-badge">0/10</span>
+          </div>
+        </div>
+
+        <!-- Column 2 -->
+        <div class="result-column">
+          <div class="result-pair">
+            <div class="result-image-block">
+              <span class="result-label">Original</span>
+              <img id="img-original-2" src="" alt="Original image 2" />
+            </div>
+            <div class="result-image-block">
+              <span class="result-label">Generated</span>
+              <img id="img-generated-2" src="" alt="Generated image 2" />
+            </div>
+          </div>
+
+          <div class="score-breakdown" id="breakdown-2">
+            <div class="breakdown-row">
+              <span class="breakdown-label">Content</span>
+              <div class="breakdown-bar-track">
+                <div class="breakdown-bar-fill content-bar" id="bar-content-2" style="width: 0%"></div>
+              </div>
+              <span class="breakdown-value" id="val-content-2">0%</span>
+            </div>
+            <div class="breakdown-row">
+              <span class="breakdown-label">Structure</span>
+              <div class="breakdown-bar-track">
+                <div class="breakdown-bar-fill structure-bar" id="bar-structure-2" style="width: 0%"></div>
+              </div>
+              <span class="breakdown-value" id="val-structure-2">0%</span>
+            </div>
+            <div class="breakdown-row">
+              <span class="breakdown-label">Colors</span>
+              <div class="breakdown-bar-track">
+                <div class="breakdown-bar-fill color-bar" id="bar-color-2" style="width: 0%"></div>
+              </div>
+              <span class="breakdown-value" id="val-color-2">0%</span>
+            </div>
+          </div>
+
+          <div class="result-stats">
+            <span id="similarity-2" class="similarity-pct">0%</span>
+            <span id="score-badge-2" class="score-badge">0/10</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="total-score-block">
+        <span class="total-label">Total</span>
+        <span id="total-score" class="total-value">0/20</span>
+      </div>
+
+      <p id="team-name-display" class="team-display"></p>
+    </div>
+  </div>
+
+  <script src="/static/js/game.js"></script>
+</body>
+</html>
