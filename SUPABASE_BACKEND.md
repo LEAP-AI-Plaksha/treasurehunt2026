@@ -241,6 +241,27 @@ marked `locked_out`, scores zero, and they move on to their next step.
 
 ---
 
+## Riddles reveal progressively, starting at the hub
+
+A crew is handed one riddle at a time, never the whole route's puzzles at once:
+
+- **`hub_check_in()`** returns the prompt for the crew's **first** room
+  (`nextRiddle`), so they know what they're walking into before they've moved.
+- **`check_in_room()`** returns the current room's own prompt again on arrival,
+  so nothing depends on anyone remembering what the hub showed them.
+- **`submit_answer()`, `record_ml_result()`, `abandon_room()`** all return the
+  **next** unresolved room's prompt (`nextRiddle`) the instant the current one
+  is resolved - pass or fail. A crew that fails a room learns their next
+  assignment just as fast as one that solves it.
+- Once every room is resolved, `nextRiddle` comes back `null`: time to return
+  to the hub.
+
+Only ever ONE room's prompt is exposed at a time - never the whole route, and
+never an answer. The underlying read is `next_riddle_preview(team_id)`, a
+read-only function so calling it never starts a clock.
+
+---
+
 ## Flow control: what stops a crew jumping ahead
 
 Three independent rules, all enforced in Postgres, so they hold no matter which
@@ -283,6 +304,23 @@ next request. `select * from active_sessions` shows where every crew is signed i
 
 Because state lives in Postgres rather than in a browser, any terminal sees a
 crew's progress the instant it changes. Nothing is cached per device.
+
+## Scoring: completion and failure, not points
+
+Standings rank by **how many rooms a crew actually solved**, not by a point
+total. Time only breaks a tie.
+
+```
+position by:
+  1. rooms_completed  desc   (more rooms solved wins)
+  2. elapsed_seconds   asc   (hub-to-hub wall clock, tiebreaker only)
+  3. finished_at       asc   (final fallback if still tied)
+```
+
+`rooms.points` / `room_visits.points_awarded` remain in the schema - they cost
+nothing to keep and might be useful for a bonus stat later - but nothing in
+`leaderboard`'s ranking reads them. `node scripts/operator.mjs leaderboard`
+shows `rooms_completed`, `rooms_failed`, and `elapsed_seconds`.
 
 ## Failing a room also finishes it
 

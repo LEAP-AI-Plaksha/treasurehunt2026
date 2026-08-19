@@ -378,8 +378,8 @@ Louvre Heist operator CLI            target: ${SUPABASE_URL}
   async leaderboard() {
     const r = await operator('leaderboard')
     if (!r.success) return out(r)
-    table(r.leaderboard, ['position', 'team_code', 'path_code', 'rooms_completed',
-                          'total_points', 'total_room_seconds', 'elapsed_seconds'])
+    table(r.leaderboard, ['position', 'team_code', 'path_code',
+                          'rooms_completed', 'rooms_failed', 'elapsed_seconds', 'total_room_seconds'])
   },
 
   async times() {

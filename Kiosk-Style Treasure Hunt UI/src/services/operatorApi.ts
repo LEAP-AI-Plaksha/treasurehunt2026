@@ -27,10 +27,14 @@ export interface LeaderboardRow {
   path_code: string
   started_at: string | null
   finished_at: string | null
+  /** Rooms actually solved. This is the primary ranking criterion. */
   rooms_completed: number
-  total_points: number
-  total_room_seconds: number
+  /** Rooms the crew got through (solved or gave up on) - always >= rooms_completed. */
+  rooms_resolved: number
+  rooms_failed: number
+  /** Hub-to-hub wall clock. The tiebreaker when rooms_completed is equal. */
   elapsed_seconds: number | null
+  total_room_seconds: number
   position: number
 }
 

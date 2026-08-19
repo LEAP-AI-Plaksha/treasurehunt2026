@@ -163,6 +163,24 @@ on conflict (code) do update set
   enrollment_code = excluded.enrollment_code;
 
 -- -----------------------------------------------------------------------------
+-- ALPHA :: a standing admin/test crew, not one of the 10 event slots.
+--
+-- Shares PATH-01 with TEAM1 rather than drawing an 11th path - there are only
+-- 10 seeded paths, and doubling a route is harmless since progress is tracked
+-- per team_id, not per path. Kept out of the TEAM1..10 path-assignment query
+-- below by getting its path set explicitly, right here.
+-- -----------------------------------------------------------------------------
+insert into public.teams (code, name, enrollment_code)
+values ('ALPHA', 'Alpha (admin test)', 'LVR-ALPHA-TEST')
+on conflict (code) do update set
+  name            = excluded.name,
+  enrollment_code = excluded.enrollment_code;
+
+update public.teams
+   set path_id = (select id from public.paths where code = 'PATH-01')
+ where code = 'ALPHA' and path_id is null;
+
+-- -----------------------------------------------------------------------------
 -- Path assignment :: deterministic, alphabetical team order onto PATH-01..10, so
 -- route cards can be printed before the event. Every route ends with the finale,
 -- which is appended by team_route() rather than stored. Teams added later are
@@ -175,7 +193,13 @@ with ranked as (
            -- length first, so TEAM10 sorts after TEAM9 instead of after TEAM1
            order by length(t.code), t.code
          ))::text, 2, '0') as path_code
+    -- Only teams still needing a path are ranked. A team assigned earlier in
+    -- this file (ALPHA, pinned to PATH-01 above) must not consume a rank slot
+    -- here, or every team after it shifts down by one and the last team is
+    -- left with no path at all - which is exactly what happened before this
+    -- filter was added.
     from public.teams t
+   where t.path_id is null
 )
 update public.teams t
    set path_id = p.id
