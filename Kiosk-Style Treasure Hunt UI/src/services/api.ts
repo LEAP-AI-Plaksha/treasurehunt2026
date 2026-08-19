@@ -430,6 +430,21 @@ async function hubLogin(teamId: string): Promise<LoginResponse> {
   }
 }
 
+/**
+ * URL for the live pose-tracking MJPEG stream. An <img> tag cannot attach an
+ * Authorization header, so the crew's token travels as a query parameter -
+ * short-lived (the Supabase access token expires in an hour) and scoped to
+ * this one room the same way the header-based calls are.
+ */
+export async function poseStreamUrl(roomId: string): Promise<string | null> {
+  const token = await accessToken()
+  if (!token) return null
+  // A relative /api/... URL works directly as an <img src> too - the browser
+  // resolves it against the page origin, and Vite's dev proxy forwards it to
+  // Flask exactly like every other request in this file.
+  return `${ML_BASE}/game/video_feed?token=${encodeURIComponent(token)}&roomId=${encodeURIComponent(roomId)}`
+}
+
 async function mlPost<T>(path: string, body: unknown): Promise<T> {
   const token = await accessToken()
   const res = await fetch(`${ML_BASE}${path}`, {

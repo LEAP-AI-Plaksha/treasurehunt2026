@@ -8,4 +8,4 @@ transformers
 Pillow
 scikit-image
 numpy
-PyJWT
+PyJWT[crypto]

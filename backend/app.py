@@ -32,7 +32,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from supabase_bridge import fetch_room_config, record_ml_result, require_team_jwt
+from supabase_bridge import fetch_room_config, record_ml_result, require_team_jwt, team_code_from_token
 
 # ---------------------------------------------------------------------------
 # Load centralized settings
@@ -95,21 +95,43 @@ def health():
 @app.route("/api/game/launch", methods=["POST"])
 @require_team_jwt
 def launch_game(team_id: str):
-    """Launch an external python game script (like the OpenCV laser grid)."""
-    import subprocess, sys
+    """Deprecated for YOGA_ROOM: the pose game now streams into the kiosk page
+    via /api/game/video_feed instead of spawning a native window (see below).
+    Kept for any future room whose module genuinely needs its own OS process.
+    """
     data = request.get_json(silent=True) or {}
     room_id = data.get("roomId", "")
-    
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.split(" ", 1)[1].strip()
+    return jsonify({"success": False, "error": f"No external module configured for {room_id or 'this room'}."}), 400
 
-    if room_id == "YOGA_ROOM":
-        script_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        script_path = os.path.join(script_dir, "louvre_laser_game.py")
-        subprocess.Popen([sys.executable, script_path, token, room_id], cwd=script_dir)
-        return jsonify({"success": True, "message": "Laser grid module initialized."})
-    
-    return jsonify({"success": False, "error": "No external module configured for this room."}), 400
+
+@app.route("/api/game/video_feed", methods=["GET"])
+def game_video_feed():
+    """MJPEG stream of the live pose-tracking session, embedded via <img src=...>.
+
+    An <img> tag cannot send an Authorization header, so the crew's token
+    travels as a query parameter instead - the same JWT that would otherwise go
+    in the header, verified the same way by require_team_jwt's underlying check.
+    """
+    token = request.args.get("token", "")
+    room_id = request.args.get("roomId", "")
+    if not token or not room_id:
+        return jsonify({"success": False, "error": "token and roomId are required"}), 400
+
+    try:
+        team_code_from_token(token)
+    except Exception as exc:
+        return jsonify({"success": False, "error": f"Invalid token: {exc}"}), 401
+
+    import sys as _sys
+    script_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if script_dir not in _sys.path:
+        _sys.path.insert(0, script_dir)
+    from louvre_laser_game import stream_game_frames
+
+    return app.response_class(
+        stream_game_frames(token, room_id),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+    )
 
 # ---------------------------------------------------------------------------
 # Routes - machine-graded results
@@ -242,4 +264,8 @@ if __name__ == "__main__":
     print(f"[*] Heist backend starting on http://{host}:{port}")
     print(f"[*] Config: {CONFIG_PATH}")
     print(f"[*] CORS origins: {len(allowed_origins)} allowed")
-    app.run(host=host, port=port, debug=debug)
+    # threaded=True is required: the video stream route makes a loopback
+    # POST back into this same process to report a win. On a single-threaded
+    # dev server that self-call would block waiting for a worker that is the
+    # one and only worker, currently busy serving the still-open stream.
+    app.run(host=host, port=port, debug=debug, threaded=True)

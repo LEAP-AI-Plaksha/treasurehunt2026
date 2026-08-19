@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import imgBackground from '@/imports/LaserGrid/73ecf9f6066a41d6d2daab627902dcec860f5ac3.png'
-import { gameApi, type RoomConfigData } from '@/services/api'
+import { gameApi, poseStreamUrl, type RoomConfigData } from '@/services/api'
 import { CURRENT_ROOM_ID, DEFAULT_MAX_ATTEMPTS, ROOM_LABELS, type RoomId } from '@/config/gameSettings'
 
 // ---------------------------------------------------------------------------
@@ -494,26 +494,33 @@ function ManualAnswerFallback({
 }
 
 function YogaRoomChallenge({ roomId, timerSeconds, onSuccess, onManualSubmit }: { roomId: string; timerSeconds: number; onSuccess: (elapsed: number) => void; onManualSubmit: (text: string) => void }) {
-  const [phase, setPhase] = useState<'ready' | 'holding'>('ready')
+  const [phase, setPhase] = useState<'ready' | 'loading' | 'streaming' | 'error'>('ready')
+  const [streamUrl, setStreamUrl] = useState<string | null>(null)
   const [error, setError] = useState('')
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const handleStart = async () => {
     if (phase !== 'ready') return
-    const res = await gameApi.launchGame(roomId)
-    if (res.success) {
-      setPhase('holding')
-      // start polling for state changes
-      intervalRef.current = setInterval(async () => {
-        const stateRes = await gameApi.getGameState(roomId)
-        if (stateRes.success && stateRes.completed) {
-          clearInterval(intervalRef.current!)
-          onSuccess(timerSeconds)
-        }
-      }, 2000)
-    } else {
-      setError(res.error || 'Failed to launch camera module.')
+    setPhase('loading')
+    const url = await poseStreamUrl(roomId)
+    if (!url) {
+      setError('Not signed in - cannot open the camera feed.')
+      setPhase('error')
+      return
     }
+    // The <img> tag itself is what triggers Flask to open the camera and start
+    // the sequence - there is no separate "launch" call. Loading the model and
+    // opening the webcam takes a few seconds on a cold start; the <img>'s
+    // onLoad only fires once the first frame actually arrives.
+    setStreamUrl(url)
+
+    intervalRef.current = setInterval(async () => {
+      const stateRes = await gameApi.getGameState(roomId)
+      if (stateRes.success && stateRes.completed) {
+        clearInterval(intervalRef.current!)
+        onSuccess(timerSeconds)
+      }
+    }, 2000)
   }
 
   useEffect(() => () => clearInterval(intervalRef.current!), [])
@@ -529,22 +536,32 @@ function YogaRoomChallenge({ roomId, timerSeconds, onSuccess, onManualSubmit }: 
         <div className="text-red-500 font-mono text-xs">{error}</div>
       )}
 
-      {phase === 'ready' ? (
+      {phase === 'ready' && (
         <button
           onClick={handleStart}
           className="border-2 px-16 py-6 font-mono font-bold text-sm tracking-[0.3em] transition-all duration-100 active:scale-95 cursor-pointer border-[#337DFF] text-white hover:bg-[#337DFF]/10"
         >
           LAUNCH CAMERA MODULE
         </button>
-      ) : (
-        <div className="border border-[#00FF88]/40 bg-[#00FF88]/05 p-8 text-center animate-pulse">
-          <div className="font-mono text-[9px] text-[#00FF88] tracking-[0.3em] mb-4 opacity-70">CAMERA ACTIVE</div>
-          <p className="font-mono text-sm text-[#00FF88] leading-relaxed tracking-wide">
-            PLEASE STAND IN FRONT OF THE CAMERA.<br />
-            MATCH THE ON-SCREEN POSES AND HOLD THEM.<br />
-            AWAITING SYSTEM VERIFICATION...
+      )}
+
+      {phase === 'loading' && (
+        <div className="border border-[#337DFF]/40 bg-[#337DFF]/05 p-8 text-center animate-pulse">
+          <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.3em] mb-2 opacity-70">INITIALISING</div>
+          <p className="font-mono text-sm text-[#337DFF] tracking-wide">
+            LOADING POSE MODEL AND OPENING CAMERA - A FEW SECONDS...
           </p>
         </div>
+      )}
+
+      {(phase === 'loading' || phase === 'streaming') && streamUrl && (
+        <img
+          src={streamUrl}
+          alt="Live pose tracking feed"
+          onLoad={() => setPhase('streaming')}
+          onError={() => { setError('Camera module failed to start. Type your answer below instead.'); setPhase('error') }}
+          className="border border-[#00FF88]/40 max-w-full max-h-[60vh]"
+        />
       )}
 
       <ManualAnswerFallback onSubmit={onManualSubmit} />

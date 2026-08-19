@@ -362,6 +362,40 @@ node scripts/operator.mjs skipped
 
 ---
 
+## The pose game runs inside the kiosk page
+
+`YOGA_ROOM` used to spawn `louvre_laser_game.py` as a separate native window
+(`cv2.imshow`) outside the browser - slow to appear and never actually part of
+the kiosk UI. It now streams into the page directly:
+
+- `GET /api/game/video_feed?token=&roomId=` (Flask) runs the exact same
+  detection/scoring/HUD code as the standalone script, but yields MJPEG frames
+  instead of opening a window. The kiosk just points an `<img>` tag at it - no
+  video library on either side.
+- The crew's JWT travels as a query parameter, because an `<img src>` cannot
+  send an Authorization header. It is the same short-lived Supabase access
+  token used everywhere else.
+- Opening the `<img>` **is** the launch: there is no separate "start" call.
+  Loading the YOLO model and opening the webcam takes a few seconds on a cold
+  start - the kiosk shows a loading state until the first frame arrives.
+- A win is still reported the same way as before: a loopback POST to
+  `/api/ml/report`, which calls `record_ml_result()` in Supabase. Flask must
+  run with `threaded=True` for this to work - a self-referential POST on a
+  single-threaded dev server would deadlock against its own still-open stream.
+- Disconnecting (closing the tab, navigating away) tears down the generator and
+  releases the camera via a `finally` block - verified with no lingering
+  process or camera handle after a client drops mid-stream.
+
+`run_game()`, the desktop version, is untouched - `python louvre_laser_game.py`
+still opens a native window for standalone development exactly as before. The
+streaming path is a second, additive entry point (`stream_game_frames()`), not
+a rewrite of the original.
+
+Every room also has a manual typed-answer fallback (`ManualAnswerFallback`)
+below whatever module it has, submitted through the normal `submit_answer()`
+RPC. This matters most for `CLASSROOM_1101` (the finale) and `H2_LOUNGE`,
+which previously had no way to progress at all if their module wasn't running.
+
 ## Editing riddles
 
 Prompts, answers and clues are placeholders. They live in `public.riddles`, one

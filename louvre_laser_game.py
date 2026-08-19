@@ -901,5 +901,193 @@ def run_game():
     cap.release()
     cv2.destroyAllWindows()
 
+
+
+# =============================================================================
+# Kiosk streaming mode
+# =============================================================================
+# The kiosk browser cannot embed a native cv2.imshow() window, so this is a
+# second entry point that reuses every bit of the detection/scoring/HUD logic
+# above but yields MJPEG frames instead of opening a desktop window. Flask
+# wraps this generator in a multipart/x-mixed-replace response and the browser
+# displays it with a plain <img> tag - no video-streaming library needed on
+# either side.
+#
+# run_game() above is left completely untouched: `python louvre_laser_game.py`
+# still opens a native window for standalone development and testing per
+# AGENTS.md. This function is only ever called from inside the Flask process.
+#
+# Differences from run_game(), all forced by having no keyboard/mouse and no
+# native window:
+#   - Starts immediately in COUNTDOWN. There is no IDLE/click-to-start state -
+#     the kiosk's own "launch" click is what causes the browser to open this
+#     stream in the first place.
+#   - No key-driven skip/restart/quit. The sequence runs start to finish or
+#     until the viewer disconnects, at which point the generator is torn down
+#     and the camera is released in the `finally` block.
+# =============================================================================
+
+def _report_pose_result(token, room_id, passed, detail):
+    """Tell the Flask backend how the sequence went, exactly as run_game() does.
+
+    A plain loopback POST back into the same Flask process - safe only because
+    the server is run with threaded=True, so this request does not block the
+    stream's own still-open response.
+    """
+    import requests
+    try:
+        requests.post(
+            "http://127.0.0.1:5000/api/ml/report",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"roomId": room_id, "passed": passed, "detail": detail},
+            timeout=10,
+        )
+    except Exception as exc:
+        print(f"[WARN] Could not report pose result: {exc}")
+
+
+def stream_game_frames(token, room_id):
+    """Generator of MJPEG frame chunks for one crew's pose sequence.
+
+    Mirrors run_game()'s state machine and drawing calls one-for-one; the only
+    changes are the output sink (yield a JPEG instead of cv2.imshow) and the
+    absence of keyboard/mouse control (auto-start, no skip/restart).
+    """
+    print("[INFO] (stream) Loading YOLOv8-Pose model...")
+    model_path = os.path.join(BASE_DIR, "yolov8n-pose.pt")
+    model = YOLO(model_path)
+    poses = build_pose_sequence(model)
+
+    import sys as _sys
+    backend = cv2.CAP_DSHOW if _sys.platform.startswith('win') else cv2.CAP_ANY
+    cap = cv2.VideoCapture(0, backend)
+    if not cap.isOpened():
+        print("[ERROR] (stream) Could not open local webcam.")
+        return
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+    state, phase_start = "COUNTDOWN", time.time()
+    pose_idx = 0
+    results = []
+    held_time, hold_started, break_start = 0.0, False, None
+    last_tick = time.time()
+    prev_keypoints = None
+    start_game_time = time.time()
+    webhook_sent = False
+
+    def finish_pose(passed):
+        nonlocal state, phase_start, results, held_time, break_start, hold_started
+        results.append(passed)
+        held_time, break_start, hold_started = 0.0, None, False
+        state, phase_start = ("POSE_PASSED" if passed else "POSE_FAILED"), time.time()
+
+    def advance():
+        nonlocal state, phase_start, pose_idx
+        pose_idx += 1
+        if pose_idx >= len(poses):
+            state, phase_start = "SUMMARY", time.time()
+        else:
+            state, phase_start = "COUNTDOWN", time.time()
+
+    try:
+        while cap.isOpened():
+            success, frame = cap.read()
+            if not success:
+                break
+
+            frame = cv2.flip(frame, 1)
+            now = time.time()
+            dt = min(now - last_tick, 0.5)
+            last_tick = now
+            t = now - start_game_time
+
+            def pose_on_screen():
+                if state == "SUMMARY" or pose_idx >= len(poses):
+                    return None
+                return poses[pose_idx]
+
+            active_pose = pose_on_screen()
+            score, motion = None, 0.0
+
+            detection = model(frame, verbose=False)
+            if detection and detection[0].keypoints is not None and len(detection[0].keypoints.data) > 0:
+                kpts = detection[0].keypoints.data[0].cpu().numpy()
+                motion = compute_frame_motion(kpts, prev_keypoints, STILLNESS_ANCHORS)
+                prev_keypoints = kpts
+                if active_pose is not None:
+                    score = evaluate_pose(kpts, active_pose)
+                for x, y, conf in kpts:
+                    if conf > CONF_THRESHOLD:
+                        cv2.circle(frame, (int(x), int(y)), 4, (0, 255, 255), -1)
+            else:
+                prev_keypoints = None
+
+            timer_remaining, hold_remaining, grace_left, waiting = 0.0, POSE_HOLD_DURATION, None, False
+
+            if state == "COUNTDOWN":
+                timer_remaining = COUNTDOWN_DURATION - (now - phase_start)
+                if timer_remaining <= 0:
+                    state, phase_start = "TRACKING", now
+                    held_time, break_start, hold_started = 0.0, None, False
+            elif state == "TRACKING":
+                holding = score is not None and score["ok"] and motion <= MOTION_LIMIT
+                if holding:
+                    held_time += dt
+                    hold_started = True
+                    break_start = None
+                elif hold_started:
+                    if break_start is None:
+                        break_start = now
+                    grace_left = max(0.0, BREAK_GRACE - (now - break_start))
+
+                waiting = not hold_started
+                hold_remaining = max(0.0, POSE_HOLD_DURATION - held_time)
+                if held_time >= POSE_HOLD_DURATION:
+                    finish_pose(True)
+                elif break_start is not None and now - break_start > BREAK_GRACE:
+                    finish_pose(False)
+                elif now - phase_start > POSE_TIME_LIMIT:
+                    finish_pose(False)
+            elif state in ("POSE_PASSED", "POSE_FAILED"):
+                if now - phase_start >= RESULT_DISPLAY:
+                    advance()
+
+            if state in ("COUNTDOWN", "TRACKING"):
+                draw_laser_grid(frame, t, alarm=False)
+            elif state == "POSE_FAILED":
+                draw_laser_grid(frame, t, alarm=True)
+                cv2.addWeighted(np.full_like(frame, (0, 0, 200)), 0.4, frame, 0.6, 0, frame)
+            elif state == "POSE_PASSED":
+                cv2.addWeighted(np.full_like(frame, (0, 200, 0)), 0.3, frame, 0.7, 0, frame)
+            elif state == "SUMMARY":
+                won = sum(1 for r in results if r) >= REQUIRED_POSES
+                tint = (0, 200, 0) if won else (0, 0, 200)
+                cv2.addWeighted(np.full_like(frame, tint), 0.25, frame, 0.75, 0, frame)
+
+                if won and not webhook_sent:
+                    webhook_sent = True
+                    _report_pose_result(token, room_id, True, {
+                        "posesCleared": sum(1 for r in results if r),
+                        "posesRequired": REQUIRED_POSES,
+                        "holdSeconds": POSE_HOLD_DURATION,
+                    })
+
+                if now - phase_start > 3.0:
+                    break
+
+            hud_pose = pose_on_screen()
+            draw_hud(frame, state, hud_pose, score if hud_pose is active_pose else None,
+                     motion, max(timer_remaining, 0.0), hold_remaining, grace_left, results, poses,
+                     waiting=waiting)
+
+            ok, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            if not ok:
+                continue
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+    finally:
+        cap.release()
+
+
 if __name__ == "__main__":
     run_game()

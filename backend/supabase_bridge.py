@@ -26,8 +26,14 @@ from flask import jsonify, request
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+# Legacy shared-secret projects only. Modern Supabase projects (including any
+# local stack started with a recent CLI) sign access tokens asymmetrically
+# (ES256) instead, verified below via the project's published JWKS - this
+# variable is kept only as a fallback for older HS256-only projects.
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 TEAM_EMAIL_DOMAIN = os.getenv("TEAM_EMAIL_DOMAIN", "louvre.local")
+
+_jwks_client: "jwt.PyJWKClient | None" = None
 
 
 class SupabaseNotConfigured(RuntimeError):
@@ -39,13 +45,19 @@ def _require_config() -> None:
         name for name, value in (
             ("SUPABASE_URL", SUPABASE_URL),
             ("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_ROLE_KEY),
-            ("SUPABASE_JWT_SECRET", SUPABASE_JWT_SECRET),
         ) if not value
     ]
     if missing:
         raise SupabaseNotConfigured(
             "Missing environment variables: " + ", ".join(missing)
         )
+
+
+def _jwks_client_for_project() -> "jwt.PyJWKClient":
+    global _jwks_client
+    if _jwks_client is None:
+        _jwks_client = jwt.PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json")
+    return _jwks_client
 
 
 # ---------------------------------------------------------------------------
@@ -58,14 +70,30 @@ def team_code_from_token(token: str) -> str:
     Crews sign in as <team>@<TEAM_EMAIL_DOMAIN>, so the team code is the local
     part of the email in the verified claims. Raises jwt exceptions on a bad,
     expired or wrong-audience token.
+
+    Tries the project's JWKS first (ES256 - what every current Supabase project
+    issues, local or hosted), falling back to the legacy HS256 shared secret for
+    an older project still configured that way.
     """
     _require_config()
-    claims = jwt.decode(
-        token,
-        SUPABASE_JWT_SECRET,
-        algorithms=["HS256"],
-        audience="authenticated",
-    )
+
+    claims = None
+    jwks_error: Exception | None = None
+    try:
+        signing_key = _jwks_client_for_project().get_signing_key_from_jwt(token)
+        claims = jwt.decode(
+            token, signing_key.key, algorithms=["ES256"], audience="authenticated"
+        )
+    except jwt.PyJWKClientError as exc:
+        jwks_error = exc
+
+    if claims is None:
+        if not SUPABASE_JWT_SECRET:
+            raise jwt.InvalidTokenError(f"Could not verify token via JWKS: {jwks_error}")
+        claims = jwt.decode(
+            token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated"
+        )
+
     email = claims.get("email") or ""
     local_part, _, domain = email.partition("@")
     if not local_part or domain != TEAM_EMAIL_DOMAIN:
