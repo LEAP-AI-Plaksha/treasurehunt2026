@@ -241,6 +241,66 @@ marked `locked_out`, scores zero, and they move on to their next step.
 
 ---
 
+## Flow control: what stops a crew jumping ahead
+
+Three independent rules, all enforced in Postgres, so they hold no matter which
+of the ten devices a crew walks up to.
+
+**1. The run must start at the origin.** `check_in_room()` refuses every room
+until the crew has checked in at the hub, so `started_at` is always set before
+any room opens.
+
+```
+> enter CTLC_LAB before the hub
+"Check in at the hub terminal first"
+```
+
+**2. Rooms open strictly in the crew's own order.** Only the next unresolved step
+is enterable. A crew due at step 1 is refused at steps 2, 4 and 6 alike — and
+because the finale is the highest step, the same rule is what stops anyone
+reaching the MLP backtrack early. No special case.
+
+```
+> enter H2_LOUNGE while due at step 1
+"Out of order: this is step 4 of your route, you are due at step 1"
+```
+
+**3. One live session per crew.** A crew cannot hold a login on two terminals.
+The newest sign-in wins — walking into the next room takes the session along, and
+the terminal they left goes dead on its very next request:
+
+```
+> device A submits after the crew signed in at device B
+"This crew is signed in at another terminal (YOGA_ROOM).
+ Only one terminal at a time - sign out there, or sign in again here to take over."
+```
+
+Enforced on the JWT's `session_id`, pinned in `teams.active_session_id`, rather
+than with Supabase's native single-session option: that option stops the old
+session *refreshing*, but a JWT is stateless and stays valid until it expires —
+an hour here, longer than the event. Pinning in the database takes effect on the
+next request. `select * from active_sessions` shows where every crew is signed in.
+
+Because state lives in Postgres rather than in a browser, any terminal sees a
+crew's progress the instant it changes. Nothing is cached per device.
+
+## Failing a room also finishes it
+
+A crew is never stuck. Pass or fail, a room is *resolved* and the next one opens:
+
+| Outcome | `status` | Points | Time recorded | Next room opens |
+|---|---|---|---|---|
+| Solved | `completed` | full | yes | yes |
+| All attempts spent | `locked_out` | 0 | yes | yes |
+| Gave up (`abandon_room`) | `locked_out` | 0 | yes | yes |
+
+`abandon_room()` exists so a stuck crew does not have to burn three wrong guesses
+to move on. `leaderboard` reports `rooms_completed` (solved) alongside
+`rooms_resolved` (got through) and `rooms_failed`, so "reached the end" and
+"cleared everything" stay distinguishable.
+
+---
+
 ## Rehearsal: walk the whole flow without solving anything
 
 ```bash
@@ -308,6 +368,7 @@ Crew-facing (`authenticated`):
 | `check_in_room(code)` | Credentials entered at a room; stamps `arrived_at`, returns the riddle. Idempotent |
 | `submit_answer(code, text)` | Grade an answer; on success stamps `completed_at` and awards points |
 | `hub_check_out()` | Return to the origin; stamps `finished_at` |
+| `abandon_room(code)` | Give up on a room: 0 points, time recorded, next room opens |
 | `my_run()` | The crew's whole route with per-room status and timing |
 
 Service role only:
@@ -333,5 +394,6 @@ clue — returns the current state instead of an "out of order" refusal.
 | `enrollment_status` | Who has enrolled, and their route |
 | `path_balance` | Crews arriving per room per step; rotating cells should all read 2 |
 | `skipped_rooms` | Rooms skipped or force-completed |
+| `active_sessions` | Which terminal each crew is currently signed in at |
 
 All are `service_role` only, reached through the `operator` edge function.

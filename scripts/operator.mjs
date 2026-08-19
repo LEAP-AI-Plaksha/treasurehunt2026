@@ -203,6 +203,10 @@ Louvre Heist operator CLI            target: ${SUPABASE_URL}
     enrollment                               who has a login, and their route
     enroll <TEAM> <ENROLL_CODE> <PASSCODE>   crew picks its own passcode instead
 
+  Running the event
+    start <TEAM> <PASSWORD>                  hub check-in (required before any room)
+    start-all <PASSWORD>                     hub check-in for every crew
+
   Rehearsal
     skip on|off                              accept ANY answer in ANY room
     order on|off                             enforce route order, or allow any
@@ -292,6 +296,50 @@ Louvre Heist operator CLI            target: ${SUPABASE_URL}
 
     const failed = rows.filter((r) => r.status !== 'ok')
     if (failed.length) console.error(`\n${failed.length} crew(s) failed - see the status column`)
+  },
+
+  /**
+   * Hub check-in from the terminal, for testing without opening the hub kiosk.
+   * A crew cannot enter any room until this has happened - that is the rule that
+   * makes the run start at the origin.
+   *
+   *   start <TEAM> <PASSWORD>     one crew
+   *   start-all <PASSWORD>        every crew (shared password)
+   */
+  async start() {
+    const [team, pass] = args
+    if (!team || !pass) return console.error('usage: start <TEAM> <PASSWORD>')
+    const jwt = await signIn(team, pass)
+    const res = await rpc('hub_check_in', {}, jwt)
+    if (!res?.success) return console.error(`${team}: ${res?.error}`)
+    const next = res.path.steps.find((s) => s.status !== 'completed' && s.status !== 'locked_out')
+    console.log(`${team}: checked in, path ${res.path.code}, due at ${next?.roomCode ?? '(done)'}`)
+  },
+
+  async 'start-all'() {
+    const pass = args[0]
+    if (!pass) return console.error('usage: start-all <PASSWORD>   (all crews must share this password)')
+    const r = await operator('enrollment')
+    if (!r.success) return out(r)
+    const crews = [...r.teams]
+      .filter((t) => t.has_login)
+      .sort((a, b) => a.team_code.length - b.team_code.length || a.team_code.localeCompare(b.team_code))
+    for (const t of crews) {
+      try {
+        const jwt = await signIn(t.team_code, pass)
+        const res = await rpc('hub_check_in', {}, jwt)
+        const next = res?.success
+          ? res.path.steps.find((s) => s.status !== 'completed' && s.status !== 'locked_out')
+          : null
+        console.log(
+          res?.success
+            ? `${t.team_code.padEnd(8)} checked in -> due at ${next?.roomCode ?? '(done)'}`
+            : `${t.team_code.padEnd(8)} FAILED: ${res?.error}`,
+        )
+      } catch (err) {
+        console.log(`${t.team_code.padEnd(8)} FAILED: ${err.message}`)
+      }
+    }
   },
 
   async passcode() {

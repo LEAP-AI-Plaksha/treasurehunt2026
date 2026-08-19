@@ -44,6 +44,15 @@ export interface LoginResponse {
   /** Set when the crew has already solved this room and walked back in. */
   alreadyCompleted?: boolean
   clue?: string | null
+
+  // Hub terminal only: signing in there brackets the run instead of opening a riddle.
+  isHub?: boolean
+  hubAction?: 'checked-in' | 'checked-out' | 'already-finished'
+  /** The crew's rooms in order, so the hub can print/read out their route. */
+  route?: string[]
+  /** The next room the crew is due at, or null once they are done. */
+  nextRoom?: string | null
+  totals?: RunSnapshot['totals']
 }
 
 export interface ValidateResponse {
@@ -55,8 +64,15 @@ export interface ValidateResponse {
   attemptsRemaining?: number
   lockout?: boolean
   error?: string
-  /** Server-measured seconds between credential entry and the correct answer. */
+  /** Server-measured seconds the crew spent in the room. */
   durationSeconds?: number
+  /** True once the crew may move on - whether they solved the room or failed it. */
+  resolved?: boolean
+  /**
+   * The crew took their session to another terminal, so this one is stale.
+   * When set, this kiosk has been signed out and should return to its idle screen.
+   */
+  sessionConflict?: boolean
 }
 
 export interface GameStateResponse {
@@ -184,6 +200,13 @@ export const gameApi = {
       return { success: false, error: 'Invalid team code or passcode' }
     }
 
+    // The hub is not a playable room: signing in there brackets the run rather
+    // than starting a riddle. First visit stamps the start, the return visit
+    // stamps the finish.
+    if (roomId === 'HUB') {
+      return hubLogin(teamId)
+    }
+
     const { data, error } = await supabase.rpc('check_in_room', { p_room_code: roomId })
 
     if (error) {
@@ -274,10 +297,18 @@ export const gameApi = {
 
     if (error) return { success: false, error: error.message }
     if (!data?.success) {
+      // A crew can only hold one live session. If they signed in elsewhere this
+      // terminal is stale, so drop its session rather than leaving a screen that
+      // looks live but rejects everything.
+      if (data?.sessionConflict) {
+        await this.logout()
+        return { success: false, sessionConflict: true, error: data.error }
+      }
       return {
         success: false,
         error: data?.error,
         lockout: data?.lockout ?? false,
+        resolved: data?.resolved ?? false,
         attemptsRemaining: data?.attemptsRemaining ?? 0,
       }
     }
@@ -290,8 +321,27 @@ export const gameApi = {
       attemptsRemaining: data.attemptsRemaining ?? 0,
       lockout: data.lockout ?? false,
       durationSeconds: data.durationSeconds ?? undefined,
+      resolved: data.resolved ?? false,
       message: data.correct ? 'Correct' : 'Incorrect',
     }
+  },
+
+  /**
+   * Close out a room the crew cannot solve, without making them burn their
+   * remaining guesses. Counts as finishing the room: 0 points, but the time is
+   * recorded and their next room opens immediately.
+   */
+  async abandonRoom(roomId: string = CURRENT_ROOM_ID): Promise<{
+    success: boolean; status?: string; durationSeconds?: number
+    message?: string; error?: string; sessionConflict?: boolean
+  }> {
+    const { data, error } = await supabase.rpc('abandon_room', { p_room_code: roomId })
+    if (error) return { success: false, error: error.message }
+    if (data?.sessionConflict) {
+      await this.logout()
+      return { success: false, sessionConflict: true, error: data.error }
+    }
+    return data as { success: boolean; status?: string; durationSeconds?: number; message?: string }
   },
 
   /** Standings are operator-only (RLS hides other crews), so this returns the
@@ -322,6 +372,62 @@ export const gameApi = {
   }> {
     return mlPost('/memory/generate', { promptLeft, promptRight })
   },
+}
+
+// ---------------------------------------------------------------------------
+// Hub terminal
+// ---------------------------------------------------------------------------
+// A crew signs in at the hub twice: once on the way out, once on the way back.
+// hub_check_in is idempotent, so this decides which of the two is happening from
+// the crew's own progress rather than from a button the operator has to press.
+async function hubLogin(teamId: string): Promise<LoginResponse> {
+  const { data: started, error: startErr } = await supabase.rpc('hub_check_in')
+  if (startErr) {
+    await supabase.auth.signOut()
+    return { success: false, error: startErr.message }
+  }
+  if (!started?.success) {
+    await supabase.auth.signOut()
+    return { success: false, error: started?.error ?? 'Could not check in at the hub' }
+  }
+
+  const code = teamId.trim().toUpperCase()
+  sessionStorage.setItem(TEAM_KEY, code)
+
+  const run = started as RunSnapshot
+  const steps = run.path?.steps ?? []
+  // A room is "resolved" once it is cleared or its attempts are spent, which is
+  // also what lets a crew move on, so the same rule decides when they are done.
+  const allResolved =
+    steps.length > 0 && steps.every((s) => s.status === 'completed' || s.status === 'locked_out')
+
+  if (allResolved && !run.team?.finishedAt) {
+    const { data: finished } = await supabase.rpc('hub_check_out')
+    const done = finished as RunSnapshot | null
+    return {
+      success: true,
+      token: 'supabase-session',
+      teamId: code,
+      isHub: true,
+      hubAction: 'checked-out',
+      route: steps.map((s) => s.roomCode),
+      totals: done?.totals ?? run.totals,
+      message: `Run complete. ${done?.totals?.roomsCompleted ?? 0} rooms, ${done?.totals?.totalPoints ?? 0} points.`,
+    }
+  }
+
+  const next = steps.find((s) => s.status !== 'completed' && s.status !== 'locked_out')
+  return {
+    success: true,
+    token: 'supabase-session',
+    teamId: code,
+    isHub: true,
+    hubAction: run.team?.finishedAt ? 'already-finished' : 'checked-in',
+    route: steps.map((s) => s.roomCode),
+    nextRoom: next?.roomCode ?? null,
+    totals: run.totals,
+    message: next ? `Proceed to ${next.label ?? next.roomCode}` : 'Return to the hub',
+  }
 }
 
 async function mlPost<T>(path: string, body: unknown): Promise<T> {
