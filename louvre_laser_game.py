@@ -870,10 +870,22 @@ def run_game():
                     token = sys.argv[1]
                     room_id = sys.argv[2]
                     try:
+                        # Reports pass/fail only. The ML service forwards this to
+                        # Supabase, which stamps the completion time, so the run is
+                        # timed by the same clock as every other room.
                         requests.post(
-                            "http://127.0.0.1:5000/api/game/validate",
+                            "http://127.0.0.1:5000/api/ml/report",
                             headers={"Authorization": f"Bearer {token}"},
-                            json={"roomId": room_id, "elapsedSeconds": POSE_HOLD_DURATION + 1}
+                            json={
+                                "roomId": room_id,
+                                "passed": True,
+                                "detail": {
+                                    "posesCleared": sum(1 for r in results if r),
+                                    "posesRequired": REQUIRED_POSES,
+                                    "holdSeconds": POSE_HOLD_DURATION,
+                                },
+                            },
+                            timeout=10,
                         )
                     except: pass
                 # Auto-close after 3 seconds of winning

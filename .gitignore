@@ -85,3 +85,25 @@ logs
 # Cache
 .eslintcache
 .cache/
+
+# ---------------------------------------------------------------------------
+# Supabase backend
+# ---------------------------------------------------------------------------
+.venv/
+
+# Local CLI state, not project source
+supabase/.branches/
+supabase/.temp/
+
+# Edge function secrets. The .example templates above are safe to track;
+# the real file holds the operator key and must never be committed.
+supabase/functions/.env
+
+# The Python rules above ignore any directory named `lib`, which would also
+# swallow the frontend's src/lib (the Supabase client lives there). Re-include it.
+!**/src/lib/
+!**/src/lib/**
+
+# Keep the env templates: they document required keys and contain no secrets.
+!*.env.example
+!.env.example
