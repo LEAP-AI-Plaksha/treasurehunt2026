@@ -17,7 +17,7 @@
 //   node scripts/operator.mjs help
 // =============================================================================
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -107,6 +107,27 @@ async function rpc(name, body, jwt) {
 }
 
 // ---------------------------------------------------------------------------
+// Credential generation
+// ---------------------------------------------------------------------------
+// Passwords a crew has to type on a kiosk under time pressure, so: lowercase,
+// no ambiguous characters, one word plus three digits. Short enough to read off
+// a slip, long enough that crews cannot guess each other's and tamper with a
+// rival's score.
+const PASSWORD_WORDS = [
+  'vault', 'louvre', 'heist', 'mosaic', 'atrium', 'cipher', 'relay', 'canvas',
+  'gallery', 'lantern', 'marble', 'archive', 'gilded', 'fresco', 'pigment',
+  'curator', 'obelisk', 'rotunda', 'palette', 'bronze',
+]
+
+function generatePasscode() {
+  const bytes = new Uint8Array(3)
+  crypto.getRandomValues(bytes)
+  const word = PASSWORD_WORDS[bytes[0] % PASSWORD_WORDS.length]
+  const digits = String(((bytes[1] << 8) | bytes[2]) % 900 + 100) // always 3 digits
+  return `${word}${digits}`
+}
+
+// ---------------------------------------------------------------------------
 // Output helpers
 // ---------------------------------------------------------------------------
 
@@ -176,9 +197,11 @@ const commands = {
 Louvre Heist operator CLI            target: ${SUPABASE_URL}
 
   Setup
-    enroll <TEAM> <ENROLL_CODE> <PASSCODE>   claim a crew's login
-    passcode <TEAM> <NEW_PASSCODE>           reset a lost passcode
-    enrollment                               who has enrolled, and their route
+    provision                                create ALL crew logins, print slips
+    provision <SHARED_PASSWORD>              same password for everyone (rehearsal)
+    passcode <TEAM> <NEW_PASSCODE>           reset one crew's password
+    enrollment                               who has a login, and their route
+    enroll <TEAM> <ENROLL_CODE> <PASSCODE>   crew picks its own passcode instead
 
   Rehearsal
     skip on|off                              accept ANY answer in ANY room
@@ -202,6 +225,73 @@ Louvre Heist operator CLI            target: ${SUPABASE_URL}
     const [team, code, pass] = args
     if (!team || !code || !pass) return console.error('usage: enroll <TEAM> <ENROLL_CODE> <PASSCODE>')
     out(await enroll(team, code, pass))
+  },
+
+  /**
+   * Create every crew's login up front with a known password, so slips can be
+   * printed and handed out. Re-running resets passwords rather than failing.
+   *
+   *   provision                 generate a password for every seeded crew
+   *   provision <pass>          give every crew the SAME password (rehearsals only)
+   */
+  async provision() {
+    const shared = args[0]
+    if (shared && shared.length < 6) {
+      return console.error('A shared password must be at least 6 characters')
+    }
+
+    const status = await operator('enrollment')
+    if (!status.success) return out(status)
+
+    const crews = [...status.teams].sort(
+      (a, b) => a.team_code.length - b.team_code.length || a.team_code.localeCompare(b.team_code),
+    )
+    if (!crews.length) return console.error('No crews in the database. Run the seed first.')
+
+    const payload = crews.map((t) => ({
+      teamCode: t.team_code,
+      name: t.team_name,
+      passcode: shared || generatePasscode(),
+    }))
+
+    const res = await operator('provisionTeams', { teams: payload })
+    if (!res.success && !res.provisioned) return out(res)
+
+    const passcodeFor = new Map(payload.map((p) => [p.teamCode, p.passcode]))
+    const rows = res.provisioned.map((r) => ({
+      team: r.teamCode,
+      password: r.success ? passcodeFor.get(r.teamCode) : '-',
+      path: r.pathCode ?? '-',
+      route: (r.route ?? []).join(' > '),
+      status: r.success ? 'ok' : r.error,
+    }))
+
+    console.log('\n=== CREDENTIALS - hand these out ===\n')
+    table(rows, ['team', 'password', 'path', 'route', 'status'])
+
+    // Written to disk because a terminal scrollback is a bad place to keep the
+    // only copy. Gitignored: this file is the one real secret in the project.
+    const file = join(REPO, 'team-credentials.txt')
+    const header =
+      `TREASURE by LEAP - A Louvre Heist\nTeam credentials\n\n` +
+      `Crews type their TEAM CODE and PASSWORD at the hub, then at every room.\n` +
+      `Route is the order of rooms for that crew; the last room is the same for everyone.\n\n`
+    writeFileSync(
+      file,
+      header +
+        rows
+          .map(
+            (r) =>
+              `${r.team.padEnd(8)} password: ${String(r.password).padEnd(12)} ` +
+              `path: ${r.path}\n         route: ${r.route}\n`,
+          )
+          .join('\n'),
+      'utf8',
+    )
+    console.log(`\nWritten to ${file} (gitignored)`)
+
+    const failed = rows.filter((r) => r.status !== 'ok')
+    if (failed.length) console.error(`\n${failed.length} crew(s) failed - see the status column`)
   },
 
   async passcode() {

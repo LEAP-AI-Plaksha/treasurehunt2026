@@ -110,6 +110,9 @@ supabase link --project-ref <your-project-ref>
 supabase db push
 ```
 
+Locally this project uses the `544xx` port range so it can run beside another
+Supabase project on the defaults.
+
 Then load the rooms, placeholder riddles, ten routes and ten crews:
 
 ```bash
@@ -166,36 +169,70 @@ score endpoints were removed — the frontend calls Supabase for those.
 
 ### Before crews arrive
 
-Replace the placeholder `enrollment_code` values in `supabase/seed.sql` with
-codes you print on each crew's slip. Anyone holding a code can claim that crew's
-login once.
-
-### At the hub, as each crew arrives
-
-The crew types its team code, its printed enrollment code, and **a passcode they
-choose**. That creates their login and prints their route:
+Create every crew's login in one go and print the slips:
 
 ```bash
-node scripts/operator.mjs enroll ALPHA LVR-ALPHA-4417 <their-passcode>
+node scripts/operator.mjs provision
 ```
 
-Then they check in at the hub with that passcode, which stamps `started_at`, and
-disperse. At every room they type the same team code and passcode.
+That generates a typeable password per crew (one word plus three digits, no
+ambiguous characters), creates the Supabase Auth users, and prints a sheet:
+
+```
+team    password     path     route
+TEAM1   <generated>  PATH-01  YOGA_ROOM > CTLC_LAB > MUSIC_ROOM > H2_LOUNGE > NOSE_DRAW > CLASSROOM_1101
+TEAM2   <generated>  PATH-02  CTLC_LAB > MUSIC_ROOM > H2_LOUNGE > NOSE_DRAW > YOGA_ROOM > CLASSROOM_1101
+...
+TEAM10  <generated>  PATH-10  NOSE_DRAW > CTLC_LAB > H2_LOUNGE > YOGA_ROOM > MUSIC_ROOM > CLASSROOM_1101
+```
+
+Real passwords are shown in your terminal and written to the file below; they are
+deliberately not reproduced in this document, which is committed.
+
+It also writes `team-credentials.txt` in the repo root — **gitignored**, and the
+only real secret in the project. Print it, hand out one line per crew, and keep
+the sheet off the kiosks.
+
+Re-running `provision` resets passwords rather than failing, which is what you
+want if a sheet goes missing. `provision <shared-password>` gives every crew the
+same password — handy for a rehearsal, wrong for the real event, since crews
+could then log in as each other and touch a rival's score.
+
+Crews type their **team code and password** at the hub to start, and the same
+pair at every room. Nothing else to set up.
+
+> Passwords are never committed and never stored in plaintext in the database —
+> Supabase Auth holds only a bcrypt hash. If you lose the sheet, re-provision.
+
+<details>
+<summary>Alternative: let crews choose their own passcode at the hub</summary>
+
+Instead of `provision`, give each crew the `enrollment_code` printed on its slip
+and have them pick a passcode at the hub terminal:
+
+```bash
+node scripts/operator.mjs enroll TEAM1 LVR-T01-4417 <their-passcode>
+```
+
+An enrollment code can only be claimed once. Replace the placeholder codes in
+`supabase/seed.sql` before the event if you use this route.
+
+</details>
 
 ### While it runs
 
 ```bash
 node scripts/operator.mjs occupancy      # which rooms have backed up
 node scripts/operator.mjs leaderboard    # standings
-node scripts/operator.mjs times ALPHA    # one crew's per-room times
+node scripts/operator.mjs times TEAM1    # one crew's per-room times
 ```
 
 ### Recovery
 
 ```bash
-node scripts/operator.mjs passcode ALPHA <new>     # crew forgot their passcode
-node scripts/operator.mjs force ALPHA YOGA_ROOM    # a room broke: credit it
-node scripts/operator.mjs reset ALPHA              # wipe a crew's run
+node scripts/operator.mjs passcode TEAM1 <new>     # crew forgot their password
+node scripts/operator.mjs force TEAM1 YOGA_ROOM    # a room broke: credit it
+node scripts/operator.mjs reset TEAM1              # wipe a crew's run
 node scripts/operator.mjs scoring closed           # freeze scoring at the end
 ```
 

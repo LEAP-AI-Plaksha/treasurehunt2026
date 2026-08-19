@@ -136,21 +136,28 @@ on conflict (room_id) where is_active do update set
 
 -- -----------------------------------------------------------------------------
 -- Teams :: 10 crews, one per path.
--- enrollment_code is what gets printed on the crew's slip. Replace these before
--- the event; anyone holding a code can claim that crew's login once.
+--
+-- Codes are deliberately plain - a crew types its code at every terminal, so
+-- TEAM1 beats a themed name under time pressure. Emails are derived from the
+-- code (TEAM1 -> team1@<TEAM_EMAIL_DOMAIN>), which is how a login maps to a crew.
+--
+-- Passwords are NOT here. This repo is public, so credentials are generated at
+-- provision time by `node scripts/operator.mjs provision`, which writes them to
+-- a gitignored file for printing. enrollment_code is only used if you ever want
+-- crews to choose their own passcode at the hub instead.
 -- -----------------------------------------------------------------------------
 insert into public.teams (code, name, enrollment_code)
 values
-  ('ALPHA',  'Team Alpha',  'LVR-ALPHA-4417'),
-  ('BETA',   'Team Beta',   'LVR-BETA-8823'),
-  ('GAMMA',  'Team Gamma',  'LVR-GAMMA-1902'),
-  ('DELTA',  'Team Delta',  'LVR-DELTA-7365'),
-  ('OMEGA',  'Team Omega',  'LVR-OMEGA-5514'),
-  ('SIGMA',  'Team Sigma',  'LVR-SIGMA-2278'),
-  ('KAPPA',  'Team Kappa',  'LVR-KAPPA-9046'),
-  ('LAMBDA', 'Team Lambda', 'LVR-LAMBDA-3391'),
-  ('THETA',  'Team Theta',  'LVR-THETA-6127'),
-  ('ZETA',   'Team Zeta',   'LVR-ZETA-4680')
+  ('TEAM1',  'Team 1',  'LVR-T01-4417'),
+  ('TEAM2',  'Team 2',  'LVR-T02-8823'),
+  ('TEAM3',  'Team 3',  'LVR-T03-1902'),
+  ('TEAM4',  'Team 4',  'LVR-T04-7365'),
+  ('TEAM5',  'Team 5',  'LVR-T05-5514'),
+  ('TEAM6',  'Team 6',  'LVR-T06-2278'),
+  ('TEAM7',  'Team 7',  'LVR-T07-9046'),
+  ('TEAM8',  'Team 8',  'LVR-T08-3391'),
+  ('TEAM9',  'Team 9',  'LVR-T09-6127'),
+  ('TEAM10', 'Team 10', 'LVR-T10-4680')
 on conflict (code) do update set
   name            = excluded.name,
   enrollment_code = excluded.enrollment_code;
@@ -164,7 +171,10 @@ on conflict (code) do update set
 -- -----------------------------------------------------------------------------
 with ranked as (
   select t.id,
-         'PATH-' || lpad((row_number() over (order by t.code))::text, 2, '0') as path_code
+         'PATH-' || lpad((row_number() over (
+           -- length first, so TEAM10 sorts after TEAM9 instead of after TEAM1
+           order by length(t.code), t.code
+         ))::text, 2, '0') as path_code
     from public.teams t
 )
 update public.teams t

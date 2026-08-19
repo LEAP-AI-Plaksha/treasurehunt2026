@@ -107,3 +107,6 @@ supabase/functions/.env
 # Keep the env templates: they document required keys and contain no secrets.
 !*.env.example
 !.env.example
+
+# Generated credential sheet - the one real secret in this repo.
+team-credentials.txt

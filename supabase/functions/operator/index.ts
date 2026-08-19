@@ -18,6 +18,8 @@
 //   setSkipRiddles - REHEARSAL: accept any answer in any room, to walk the flow
 //   forceComplete  - mark one room done for one crew
 //   skipped        - list every room that was skipped or force-completed
+//   provisionTeams - create every crew's login up front with a known password,
+//                    so credentials can be printed and handed out
 // =============================================================================
 
 import { createClient } from 'jsr:@supabase/supabase-js@2'
@@ -31,6 +33,7 @@ interface OperatorBody {
   open?: boolean
   enforce?: boolean
   skip?: boolean
+  teams?: { teamCode?: string; name?: string; passcode?: string }[]
 }
 
 Deno.serve(async (req) => {
@@ -242,6 +245,124 @@ Deno.serve(async (req) => {
       return error
         ? json({ success: false, error: error.message }, 500, origin)
         : json({ success: true, skipped: data }, 200, origin)
+    }
+
+    // -------------------------------------------------------------------------
+    // Bulk provisioning
+    // -------------------------------------------------------------------------
+    case 'provisionTeams': {
+      // Creates or updates each crew's login with a password you already know,
+      // so slips can be printed and handed out instead of crews choosing a
+      // passcode at the hub. Idempotent: re-running resets the password rather
+      // than failing, which is what you want if a sheet gets lost.
+      if (!Array.isArray(body.teams) || body.teams.length === 0) {
+        return json({ success: false, error: 'teams must be a non-empty array' }, 400, origin)
+      }
+
+      const emailDomain = Deno.env.get('TEAM_EMAIL_DOMAIN') ?? 'louvre.local'
+      const results: unknown[] = []
+
+      // One lookup up front: the admin API cannot filter users by email, and
+      // doing it per crew would be a request each.
+      const { data: userPage } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
+      const byEmail = new Map(
+        (userPage?.users ?? []).map((u) => [(u.email ?? '').toLowerCase(), u.id]),
+      )
+
+      for (const entry of body.teams) {
+        const code = (entry.teamCode ?? '').trim().toUpperCase()
+        const passcode = entry.passcode ?? ''
+
+        if (!code || passcode.length < 6) {
+          results.push({ teamCode: code, success: false, error: 'Passcode must be at least 6 characters' })
+          continue
+        }
+
+        const email = `${code.toLowerCase()}@${emailDomain}`
+
+        // The crew row must already exist (it comes from the seed), so that
+        // provisioning cannot silently invent a team that has no path.
+        const { data: team, error: teamErr } = await admin
+          .from('teams')
+          .select('id, code, name, path_id, auth_user_id')
+          .eq('code', code)
+          .maybeSingle()
+
+        if (teamErr || !team) {
+          results.push({ teamCode: code, success: false, error: teamErr?.message ?? 'Unknown team code' })
+          continue
+        }
+
+        // Assign the least-loaded path if the seed did not pre-assign one.
+        let pathId = team.path_id as string | null
+        if (!pathId) {
+          const { data: paths } = await admin.from('paths').select('id, code, teams(count)').order('code')
+          const load = (p: { teams?: { count: number }[] }) => p.teams?.[0]?.count ?? 0
+          pathId = paths?.length ? [...paths].sort((a, b) => load(a) - load(b))[0].id : null
+        }
+
+        const existingId = (team.auth_user_id as string | null) ?? byEmail.get(email) ?? null
+        let userId = existingId
+
+        if (existingId) {
+          const { error } = await admin.auth.admin.updateUserById(existingId, { password: passcode })
+          if (error) {
+            results.push({ teamCode: code, success: false, error: error.message })
+            continue
+          }
+        } else {
+          const { data: created, error } = await admin.auth.admin.createUser({
+            email,
+            password: passcode,
+            email_confirm: true,
+            user_metadata: { team_code: code, team_name: entry.name ?? team.name },
+          })
+          if (error || !created?.user) {
+            results.push({ teamCode: code, success: false, error: error?.message ?? 'Could not create login' })
+            continue
+          }
+          userId = created.user.id
+        }
+
+        const { error: linkErr } = await admin
+          .from('teams')
+          .update({
+            auth_user_id: userId,
+            path_id: pathId,
+            enrolled_at: new Date().toISOString(),
+            ...(entry.name ? { name: entry.name } : {}),
+          })
+          .eq('id', team.id)
+
+        if (linkErr) {
+          results.push({ teamCode: code, success: false, error: linkErr.message })
+          continue
+        }
+
+        const { data: status } = await admin
+          .from('enrollment_status')
+          .select('path_code, route')
+          .eq('team_code', code)
+          .maybeSingle()
+
+        results.push({
+          teamCode: code,
+          name: entry.name ?? team.name,
+          email,
+          success: true,
+          pathCode: status?.path_code ?? null,
+          route: status?.route ?? [],
+        })
+      }
+
+      return json(
+        {
+          success: results.every((r) => (r as { success: boolean }).success),
+          provisioned: results,
+        },
+        200,
+        origin,
+      )
     }
 
     default:
