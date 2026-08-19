@@ -396,6 +396,29 @@ below whatever module it has, submitted through the normal `submit_answer()`
 RPC. This matters most for `CLASSROOM_1101` (the finale) and `H2_LOUNGE`,
 which previously had no way to progress at all if their module wasn't running.
 
+## The pose game's HUD is themed, not raw OpenCV text
+
+The camera overlay used to draw plain Hershey-font text in ad-hoc colors -
+visibly a different application from the browser it now streams into. It is
+rendered through Pillow instead (`hud_theme.py`), using the kiosk's own
+JetBrains Mono files and exact Tailwind hex palette (`#337DFF` / `#00FF88` /
+`#FF3333` / `#000307`), with the same bordered-panel-plus-corner-accent
+language as `KioskBadge`/`AuthModal` in the React UI.
+
+`hud_theme.Canvas` does the BGR<->RGB round trip once per frame - not once per
+label - and blends each translucent panel into the frame **immediately**
+rather than deferring all panels to a single composite at the end of the
+frame: deferring would put every panel visually on top of everything else
+regardless of the order the code drew things in, which is exactly what
+happened during development - an opaque button fill silently erased the label
+drawn "after" it in the source, because both were doomed to sit under the same
+end-of-frame overlay. Measured overhead is ~30ms/frame against a ~300ms/frame
+YOLO inference cost - not a bottleneck.
+
+`assets/fonts/` bundles the JetBrains Mono TTF files (OFL-1.1 licensed)
+directly, rather than depending on whatever fonts happen to be installed on
+each kiosk machine's OS.
+
 ## Editing riddles
 
 Prompts, answers and clues are placeholders. They live in `public.riddles`, one
