@@ -198,6 +198,94 @@ def memory_images(team_id: str):
     })
 
 
+# ---------------------------------------------------------------------------
+# Cloudflare Workers AI Pool & Failover
+# ---------------------------------------------------------------------------
+
+CF_KEY_POOL: list[dict[str, str]] = []
+_CURRENT_CF_INDEX = 0
+
+
+def _get_cf_key_pool() -> list[dict[str, str]]:
+    global CF_KEY_POOL
+    if CF_KEY_POOL:
+        return CF_KEY_POOL
+
+    pool: list[dict[str, str]] = []
+    raw_accounts = os.getenv("CF_ACCOUNTS", "").strip()
+    if raw_accounts:
+        for pair in raw_accounts.split(","):
+            if ":" in pair:
+                acc_id, token = pair.split(":", 1)
+                acc_id, token = acc_id.strip(), token.strip()
+                if acc_id and token:
+                    pool.append({"account_id": acc_id, "api_token": token})
+
+    # Fallback to single CF_ACCOUNT_ID and CF_API_TOKEN
+    if not pool:
+        acc_id = os.getenv("CF_ACCOUNT_ID", "").strip()
+        token = os.getenv("CF_API_TOKEN", "").strip()
+        if acc_id and token:
+            pool.append({"account_id": acc_id, "api_token": token})
+
+    CF_KEY_POOL = pool
+    return CF_KEY_POOL
+
+
+def call_cloudflare_image_generation(prompt: str, timeout: int = 40) -> str:
+    """Generate image via Cloudflare Workers AI with automatic failover between keys."""
+    global _CURRENT_CF_INDEX
+    pool = _get_cf_key_pool()
+    if not pool:
+        raise RuntimeError("No Cloudflare credentials available.")
+
+    cf_model = "@cf/black-forest-labs/flux-1-schnell"
+    total_keys = len(pool)
+    last_error = "Unknown error"
+
+    for attempt in range(total_keys):
+        idx = (_CURRENT_CF_INDEX + attempt) % total_keys
+        cred = pool[idx]
+        acc_id = cred["account_id"]
+        token = cred["api_token"]
+
+        cf_url = f"https://api.cloudflare.com/client/v4/accounts/{acc_id}/ai/run/{cf_model}"
+        cf_headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            print(f"[*] Cloudflare AI request using key index {idx} (Account: {acc_id[:8]}...)")
+            resp = http_requests.post(cf_url, headers=cf_headers, json={"prompt": prompt}, timeout=timeout)
+
+            if resp.status_code == 200:
+                result = resp.json()
+                img_b64 = None
+                if isinstance(result.get("result"), dict):
+                    img_b64 = result["result"].get("image")
+
+                if img_b64:
+                    _CURRENT_CF_INDEX = idx  # keep successful key as default
+                    print(f"[*] Cloudflare image generated successfully on key index {idx}")
+                    return img_b64
+
+                last_error = f"Invalid response payload: {resp.text[:200]}"
+                print(f"[!] Key {idx} returned 200 but missing image payload: {last_error}")
+            else:
+                last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                print(f"[!] Key {idx} failed with {last_error}")
+
+        except http_requests.exceptions.Timeout:
+            last_error = f"Timeout after {timeout}s"
+            print(f"[!] Key {idx} timed out. Switching to next key...")
+        except Exception as exc:
+            last_error = str(exc)
+            print(f"[!] Key {idx} error: {last_error}. Switching to next key...")
+
+    raise RuntimeError(f"All {total_keys} Cloudflare keys failed. Last error: {last_error}")
+
+
 @app.route("/api/memory/generate", methods=["POST"])
 @require_team_jwt
 def memory_generate(team_id: str):
@@ -210,34 +298,11 @@ def memory_generate(team_id: str):
     prompt_left = data.get("promptLeft", "").strip() or "a random abstract colorful image"
     prompt_right = data.get("promptRight", "").strip() or "a random abstract colorful image"
 
-    cf_account_id = os.getenv("CF_ACCOUNT_ID", "")
-    cf_api_token = os.getenv("CF_API_TOKEN", "")
-    cf_model = "@cf/black-forest-labs/flux-1-schnell"
-
-    if not cf_account_id or not cf_api_token:
-        return jsonify({"success": False, "error": "Cloudflare credentials not configured"}), 503
-
-    cf_url = f"https://api.cloudflare.com/client/v4/accounts/{cf_account_id}/ai/run/{cf_model}"
-    cf_headers = {
-        "Authorization": f"Bearer {cf_api_token}",
-        "Content-Type": "application/json",
-    }
-
     generated = {}
     for side, prompt in [("left", prompt_left), ("right", prompt_right)]:
         try:
-            resp = http_requests.post(cf_url, headers=cf_headers, json={"prompt": prompt}, timeout=60)
-            if resp.status_code != 200:
-                return jsonify({"success": False, "error": f"Generation failed for {side}: {resp.text[:300]}"}), 502
-
-            result = resp.json()
-            img_b64 = None
-            if isinstance(result.get("result"), dict):
-                img_b64 = result["result"].get("image")
-            if not img_b64:
-                return jsonify({"success": False, "error": f"No image data for {side}"}), 502
-
-            filename = f"{token}_{side}.png"
+            img_b64 = call_cloudflare_image_generation(prompt=prompt, timeout=40)
+            filename = f"{team_id}_{side}_{uuid.uuid4().hex[:6]}.png"
             save_path = os.path.join(os.path.dirname(__file__), "static", "generated", filename)
             with open(save_path, "wb") as fh:
                 fh.write(base64.b64decode(img_b64))
@@ -249,7 +314,11 @@ def memory_generate(team_id: str):
     session["generated_left"] = generated["left"]
     session["generated_right"] = generated["right"]
 
-    return jsonify({"success": True, "generatedLeft": generated["left"], "generatedRight": generated["right"]})
+    return jsonify({
+        "success": True,
+        "generatedLeft": generated["left"],
+        "generatedRight": generated["right"]
+    })
 
 
 
