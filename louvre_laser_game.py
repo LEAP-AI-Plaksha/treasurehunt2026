@@ -3,6 +3,9 @@ import cv2
 import numpy as np
 import time
 from ultralytics import YOLO
+from PIL import Image
+
+from hud_theme import Canvas, BLUE, BLUE_LIGHT, GREEN, RED, AMBER, WHITE, GREY, DIM, BG_BLACK
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -426,9 +429,9 @@ def evaluate_pose(kpts, pose):
 # GRAPHICS & HUD RENDERING
 # ==========================================
 
-def draw_skeleton(canvas, kp, color=(0, 220, 255), thickness=3, pad=0.1):
+def draw_skeleton(canvas_bgr, kp, color=BLUE, thickness=3, pad=0.1):
     """Draws a keypoint dict as a stick figure, fitted to the canvas."""
-    h, w = canvas.shape[:2]
+    h, w = canvas_bgr.shape[:2]
     xs = [p[0] for p in kp.values()]
     ys = [p[1] for p in kp.values()]
     span = max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0
@@ -440,13 +443,13 @@ def draw_skeleton(canvas, kp, color=(0, 220, 255), thickness=3, pad=0.1):
 
     for a, b in SKELETON_EDGES:
         if a in kp and b in kp:
-            cv2.line(canvas, to_px(kp[a]), to_px(kp[b]), color, thickness, cv2.LINE_AA)
+            cv2.line(canvas_bgr, to_px(kp[a]), to_px(kp[b]), color[::-1], thickness, cv2.LINE_AA)
     if 0 in kp:
-        cv2.circle(canvas, to_px(kp[0]), max(4, int(0.05 * span * scale)), color, thickness, cv2.LINE_AA)
+        cv2.circle(canvas_bgr, to_px(kp[0]), max(4, int(0.05 * span * scale)), color[::-1], thickness, cv2.LINE_AA)
     for idx, p in kp.items():
         if idx in (0, 1, 2, 3, 4):
             continue
-        cv2.circle(canvas, to_px(p), 3, (255, 255, 255), -1, cv2.LINE_AA)
+        cv2.circle(canvas_bgr, to_px(p), 3, WHITE[::-1], -1, cv2.LINE_AA)
 
 def make_thumb(kp, photo=None, size=(240, 260)):
     """Reference thumbnail: the source photo when there is one, else a stick figure."""
@@ -455,20 +458,24 @@ def make_thumb(kp, photo=None, size=(240, 260)):
         scale = min(tw / photo.shape[1], th / photo.shape[0])
         resized = cv2.resize(photo, (max(1, int(photo.shape[1] * scale)),
                                      max(1, int(photo.shape[0] * scale))))
-        canvas = np.full((th, tw, 3), 20, np.uint8)
+        canvas = np.full((th, tw, 3), BG_BLACK[::-1], np.uint8)
         y0 = (th - resized.shape[0]) // 2
         x0 = (tw - resized.shape[1]) // 2
         canvas[y0:y0 + resized.shape[0], x0:x0 + resized.shape[1]] = resized
         return canvas
 
-    canvas = np.full((th, tw, 3), 20, np.uint8)
+    canvas = np.full((th, tw, 3), BG_BLACK[::-1], np.uint8)
     draw_skeleton(canvas, kp)
     return canvas
 
 def draw_laser_grid(frame, t, alarm=False):
+    """Sweeping security-laser lines. Blue during a normal hold, red once an
+    alarm trips - the room's own accent color doubles as the "all clear" state,
+    matching the LASER GRID room's blue branding in the kiosk.
+    """
     h, w, _ = frame.shape
     overlay = frame.copy()
-    color = (0, 0, 255)
+    color = (RED if alarm else BLUE)[::-1]
     thickness = 4 if alarm else 2
 
     for i in range(4):
@@ -479,214 +486,209 @@ def draw_laser_grid(frame, t, alarm=False):
         x = int((w / 6) * (i + 1) + np.cos(t * 1.5 + i) * 40)
         cv2.line(overlay, (x, 0), (x, h), color, thickness)
 
-    cv2.addWeighted(overlay, 0.4, frame, 0.6, 0, frame)
+    cv2.addWeighted(overlay, 0.35, frame, 0.65, 0, frame)
 
 def start_button_rect(w, h):
     return (w - 260, h - 90, w - 30, h - 40)
 
-def draw_reference_thumb(frame, pose):
+def draw_reference_thumb(c, pose, x0, y0):
+    """Bordered target-pose panel: thumbnail, pose name, and Sanskrit name -
+    the same bordered-panel-plus-label pattern as the kiosk's KioskBadge.
+    """
     thumb = pose["thumb"]
-    _, w, _ = frame.shape
     th, tw = thumb.shape[0], thumb.shape[1]
-    x0, y0 = w - tw - 20, 110
-    cv2.rectangle(frame, (x0 - 4, y0 - 4), (x0 + tw + 4, y0 + th + 4), (0, 220, 255), 2)
-    cv2.putText(frame, f"TARGET {pose['index']}/{len(POSE_LIBRARY)}", (x0, y0 - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 255), 1)
-    frame[y0:y0 + th, x0:x0 + tw] = thumb
-    cv2.putText(frame, pose["name"][:24], (x0, y0 + th + 22),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    cv2.putText(frame, pose["sanskrit"][:30], (x0, y0 + th + 42),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (170, 170, 170), 1)
+    c.panel((x0 - 6, y0 - 34, x0 + tw + 6, y0 + th + 54), fill=BG_BLACK, fill_alpha=190, outline=BLUE, width=2)
+    c.text((x0, y0 - 24), f"TARGET {pose['index']}/{len(POSE_LIBRARY)}", size=13, color=BLUE, weight="Bold", tracking=2)
+    thumb_rgb = cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB)
+    c.image.paste(Image.fromarray(thumb_rgb), (x0, y0))
+    c.text((x0, y0 + th + 8), pose["name"][:24].upper(), size=14, color=WHITE, weight="Bold", tracking=1)
+    c.text((x0, y0 + th + 28), pose["sanskrit"][:30], size=12, color=GREY, weight="Regular")
 
-def draw_progress_dots(frame, results, current_index):
-    h = frame.shape[0]
+def draw_progress_dots(c, results, current_index, x0, y):
     n = len(POSE_LIBRARY)
     r = 11
     gap = 33
-    x0 = 20
-    y = h - 62
-    cv2.putText(frame, f"SEQUENCE - CLEAR {REQUIRED_POSES} OF {n}", (x0, y - 22),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+    c.text((x0, y - 26), f"SEQUENCE - CLEAR {REQUIRED_POSES} OF {n}", size=12, color=GREY, weight="Medium", tracking=1)
     for i in range(n):
         cx = x0 + r + i * gap
         outcome = results[i] if i < len(results) else None
         if outcome is True:
-            color, fill = (0, 255, 120), -1
+            color, fill = GREEN, True
         elif outcome is False:
-            color, fill = (0, 0, 255), -1
+            color, fill = RED, True
         elif i == current_index:
-            color, fill = (0, 220, 255), 2
+            color, fill = BLUE, False
         else:
-            color, fill = (110, 110, 110), 1
-        cv2.circle(frame, (cx, y), r, color, fill)
-        label_col = (0, 0, 0) if fill == -1 else color
-        cv2.putText(frame, str(i + 1), (cx - 7 if i >= 9 else cx - 4, y + 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, label_col, 1)
+            color, fill = DIM, False
+        if fill:
+            c.ellipse((cx - r, y - r, cx + r, y + r), fill=color)
+            label_col = BG_BLACK
+        else:
+            c.ellipse((cx - r, y - r, cx + r, y + r), outline=color, width=2)
+            label_col = color
+        digit = str(i + 1)
+        dw, _ = c.text_size(digit, size=11, weight="Bold")
+        c.text((cx - dw / 2, y - 7), digit, size=11, color=label_col, weight="Bold")
 
-def draw_check_panel(frame, score, grace_left, waiting=False):
+def draw_check_panel(c, score, grace_left, x0, y0, waiting=False):
     if score is None:
-        return
-    y = 120
+        return y0
+    y = y0
+    c.text((x0, y - 20), "POSE ALIGNMENT", size=12, color=BLUE_LIGHT, weight="Bold", tracking=2)
     for res in score["angle_results"]:
-        txt = f"{res['name']}: {int(res['actual'])} deg (ref {int(res['target'])})"
-        col = (0, 255, 0) if res["matched"] else (0, 0, 255)
-        cv2.putText(frame, txt, (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
-        y += 24
+        txt = f"{res['name'].upper()}: {int(res['actual'])} DEG (REF {int(res['target'])})"
+        col = GREEN if res["matched"] else RED
+        c.text((x0, y), txt, size=13, color=col, weight="Medium")
+        y += 22
 
-    axis_col = (0, 255, 0) if score["axis_matched"] == score["axis_total"] else (0, 165, 255)
-    cv2.putText(frame, f"ALIGNMENT: {score['axis_matched']}/{score['axis_total']} limbs",
-                (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, axis_col, 1)
-    y += 30
+    axis_col = GREEN if score["axis_matched"] == score["axis_total"] else AMBER
+    c.text((x0, y), f"ALIGNMENT: {score['axis_matched']}/{score['axis_total']} LIMBS", size=13, color=axis_col, weight="Medium")
+    y += 28
 
     pct = int(round(score["ratio"] * 100))
-    bar_w, bar_h = 240, 14
-    cv2.rectangle(frame, (20, y), (20 + bar_w, y + bar_h), (40, 40, 40), -1)
-    fill = int(bar_w * min(score["ratio"], 1.0))
-    col = (0, 255, 0) if score["ok"] else (0, 165, 255)
-    cv2.rectangle(frame, (20, y), (20 + fill, y + bar_h), col, -1)
-    thresh_x = 20 + int(bar_w * POSE_MATCH_RATIO)
-    cv2.line(frame, (thresh_x, y - 3), (thresh_x, y + bar_h + 3), (255, 255, 255), 1)
-    cv2.rectangle(frame, (20, y), (20 + bar_w, y + bar_h), (200, 200, 200), 1)
-    cv2.putText(frame, f"POSE MATCH: {pct}%", (20 + bar_w + 12, y + bar_h - 1),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
+    bar_w, bar_h = 240, 12
+    c.rect((x0, y, x0 + bar_w, y + bar_h), fill=DIM)
+    fill_w = int(bar_w * min(score["ratio"], 1.0))
+    col = GREEN if score["ok"] else AMBER
+    if fill_w > 0:
+        c.rect((x0, y, x0 + fill_w, y + bar_h), fill=col)
+    thresh_x = x0 + int(bar_w * POSE_MATCH_RATIO)
+    c.line((thresh_x, y - 3, thresh_x, y + bar_h + 3), fill=WHITE, width=1)
+    c.rect((x0, y, x0 + bar_w, y + bar_h), outline=GREY, width=1)
+    c.text((x0 + bar_w + 12, y - 2), f"MATCH: {pct}%", size=13, color=col, weight="Bold")
+    y += bar_h + 24
 
     if grace_left is not None:
-        cv2.putText(frame, f"POSE BROKEN - RECOVER ({grace_left:.1f}s)", (20, y + 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
+        c.text((x0, y), f"POSE BROKEN - RECOVER ({grace_left:.1f}S)", size=15, color=RED, weight="Bold", tracking=1)
     elif waiting:
-        cv2.putText(frame, "MATCH THE POSE TO START THE CLOCK", (20, y + 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 220, 255), 2)
+        c.text((x0, y), "MATCH THE POSE TO START THE CLOCK", size=15, color=BLUE, weight="Bold", tracking=1)
+    return y + 26
 
-def draw_motion_meter(frame, motion_val):
-    h = frame.shape[0]
-    meter_w, meter_h = 240, 14
-    meter_x, meter_y = 20, h - 26
+def draw_motion_meter(c, motion_val, x0, y):
+    meter_w, meter_h = 240, 12
     ratio = min(motion_val / (MOTION_LIMIT * 2.0), 1.0)
-    cv2.rectangle(frame, (meter_x, meter_y), (meter_x + meter_w, meter_y + meter_h), (30, 30, 30), -1)
-    meter_col = (0, 255, 0) if motion_val <= MOTION_LIMIT else (0, 0, 255)
-    cv2.rectangle(frame, (meter_x, meter_y), (meter_x + int(ratio * meter_w), meter_y + meter_h), meter_col, -1)
-    cv2.rectangle(frame, (meter_x, meter_y), (meter_x + meter_w, meter_y + meter_h), (200, 200, 200), 1)
-    cv2.putText(frame, f"SEISMIC MOTION: {motion_val * 100:.1f}%", (meter_x + meter_w + 12, meter_y + meter_h - 1),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1)
+    c.rect((x0, y, x0 + meter_w, y + meter_h), fill=DIM)
+    meter_col = GREEN if motion_val <= MOTION_LIMIT else RED
+    fill_w = int(ratio * meter_w)
+    if fill_w > 0:
+        c.rect((x0, y, x0 + fill_w, y + meter_h), fill=meter_col)
+    c.rect((x0, y, x0 + meter_w, y + meter_h), outline=GREY, width=1)
+    c.text((x0 + meter_w + 12, y - 2), f"STILLNESS: {motion_val * 100:.1f}%", size=12, color=GREY, weight="Medium")
 
-def draw_summary(frame, poses, results):
-    h, w, _ = frame.shape
+def draw_summary(c, poses, results):
+    w, h = c.w, c.h
     cleared = sum(1 for r in results if r)
     won = cleared >= REQUIRED_POSES
-    panel = frame.copy()
-    cv2.rectangle(panel, (w // 2 - 340, 90), (w // 2 + 340, h - 50), (12, 12, 16), -1)
-    cv2.addWeighted(panel, 0.85, frame, 0.15, 0, frame)
-    cv2.rectangle(frame, (w // 2 - 340, 90), (w // 2 + 340, h - 50),
-                  (0, 255, 128) if won else (0, 0, 255), 2)
+    accent = GREEN if won else RED
+
+    x0, y0, x1, y1 = w // 2 - 340, 90, w // 2 + 340, h - 50
+    c.panel((x0, y0, x1, y1), fill=BG_BLACK, fill_alpha=225, outline=accent, width=2, corner_len=16)
 
     headline = "HEIST COMPLETE" if won else "SECURITY LOCKDOWN"
-    cv2.putText(frame, headline, (w // 2 - 250, 115), cv2.FONT_HERSHEY_SIMPLEX, 1.2,
-                (0, 255, 128) if won else (0, 0, 255), 3)
-    cv2.putText(frame, f"POSES HELD: {cleared}/{len(poses)}   (needed {REQUIRED_POSES})",
-                (w // 2 - 250, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    c.centered_text((x0 + x1) // 2, y0 + 24, headline, size=34, color=accent, weight="ExtraBold", tracking=3)
+    c.centered_text((x0 + x1) // 2, y0 + 66, f"POSES HELD: {cleared}/{len(poses)}  (NEEDED {REQUIRED_POSES})",
+                     size=15, color=WHITE, weight="Medium", tracking=1)
 
-    y = 190
+    y = y0 + 100
     for pose, outcome in zip(poses, results):
-        col = (0, 255, 120) if outcome else (0, 0, 255)
-        mark = "HELD " if outcome else "BROKE"
-        cv2.putText(frame, f"{pose['index']:2d}. {pose['name']:<26s} {mark}", (w // 2 - 250, y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, col, 1)
-        y += 28
+        col = GREEN if outcome else RED
+        mark = "HELD" if outcome else "BROKE"
+        c.text((x0 + 30, y), f"{pose['index']:>2}. {pose['name'].upper():<26} {mark}", size=14, color=col, weight="Medium")
+        y += 26
 
-    cv2.putText(frame, "SPACE / CLICK START to run the sequence again   -   Q to quit",
-                (w // 2 - 300, h - 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    c.centered_text((x0 + x1) // 2, y1 - 34, "SPACE / CLICK START TO RUN AGAIN  -  Q TO QUIT",
+                     size=12, color=GREY, weight="Medium", tracking=1)
 
 def draw_hud(frame, state, pose, score, motion_val, timer_remaining, hold_remaining,
              grace_left, results, poses, waiting=False):
-    h, w, _ = frame.shape
+    """Composites the whole HUD in a single PIL pass over `frame` and returns
+    the finished BGR frame - callers must use the return value, this no longer
+    mutates `frame` in place (a PIL round trip cannot write back into a numpy
+    buffer for free the way raw cv2 calls could).
+    """
+    c = Canvas(frame)
+    w, h = c.w, c.h
 
-    cv2.rectangle(frame, (0, 0), (w, 100), (15, 15, 20), -1)
-    cv2.line(frame, (0, 100), (w, 100), (0, 220, 255), 2)
+    # -- top status bar ---------------------------------------------------
+    c.panel((0, 0, w, 100), fill=BG_BLACK, fill_alpha=210, outline=None, corners=False)
+    c.line((0, 100, w, 100), fill=BLUE, width=2)
     cleared = sum(1 for r in results if r)
     failed = sum(1 for r in results if r is False)
-    cv2.putText(frame, "LOUVRE SECURITY // 10-POSE LASER GAUNTLET", (20, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 255), 2)
+    c.text((20, 16), "LOUVRE SECURITY // 10-POSE LASER GAUNTLET", size=19, color=BLUE, weight="Bold", tracking=2)
     if pose is not None:
-        cv2.putText(frame, f"POSE {pose['index']}/{len(poses)}: {pose['name']} - {pose['cue']}", (20, 58),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1)
+        c.text((20, 52), f"POSE {pose['index']}/{len(poses)}: {pose['name'].upper()} - {pose['cue'].upper()}",
+               size=13, color=GREY, weight="Medium")
     else:
-        cv2.putText(frame, f"Hold {len(poses)} yoga poses for {POSE_HOLD_DURATION:.0f}s each. "
-                           f"Clear {REQUIRED_POSES} to beat the lasers.", (20, 58),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1)
-    cv2.putText(frame, f"HELD: {cleared}   BROKEN: {failed}   TARGET: {REQUIRED_POSES}", (20, 84),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (170, 170, 170), 1)
+        c.text((20, 52), f"HOLD {len(poses)} YOGA POSES FOR {POSE_HOLD_DURATION:.0f}S EACH. "
+                         f"CLEAR {REQUIRED_POSES} TO BEAT THE LASERS.", size=13, color=GREY, weight="Medium")
+    c.text((20, 76), f"HELD: {cleared}   BROKEN: {failed}   TARGET: {REQUIRED_POSES}", size=12, color=DIM, weight="Medium")
 
+    # -- status badge, top right -------------------------------------------
     if state == "IDLE":
-        status_text, status_color = "READY - CLICK START", (0, 165, 255)
+        status_text, status_color = "READY - CLICK START", AMBER
     elif state == "COUNTDOWN":
-        status_text, status_color = "GET INTO POSE...", (0, 220, 255)
+        status_text, status_color = "GET INTO POSE", BLUE
     elif state == "TRACKING":
-        if waiting:
-            status_text, status_color = "MATCH THE POSE", (0, 220, 255)
-        else:
-            status_text, status_color = f"HOLD: {hold_remaining:.1f}s", (0, 255, 0)
+        status_text, status_color = ("MATCH THE POSE" if waiting else f"HOLD: {hold_remaining:.1f}S"), (BLUE if waiting else GREEN)
     elif state == "POSE_FAILED":
-        status_text, status_color = "! ALARM - POSE LOST !", (0, 0, 255)
+        status_text, status_color = "ALARM - POSE LOST", RED
     elif state == "POSE_PASSED":
-        status_text, status_color = "POSE SECURED", (0, 255, 128)
+        status_text, status_color = "POSE SECURED", GREEN
     else:
-        status_text, status_color = "SEQUENCE OVER", (0, 255, 128)
+        status_text, status_color = "SEQUENCE OVER", GREEN
 
-    cv2.rectangle(frame, (w - 330, 12), (w - 20, 76), (25, 25, 30), -1)
-    cv2.rectangle(frame, (w - 330, 12), (w - 20, 76), status_color, 2)
-    cv2.putText(frame, status_text, (w - 315, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
+    badge = (w - 330, 12, w - 20, 76)
+    c.panel(badge, fill=BG_BLACK, fill_alpha=210, outline=status_color, width=2)
+    c.centered_text((badge[0] + badge[2]) // 2, 33, status_text, size=17, color=status_color, weight="ExtraBold", tracking=2)
 
     if state == "SUMMARY":
-        draw_summary(frame, poses, results)
-        return
+        draw_summary(c, poses, results)
+        return c.finish()
 
     if pose is not None:
-        draw_reference_thumb(frame, pose)
+        draw_reference_thumb(c, pose, w - pose["thumb"].shape[1] - 20, 116)
 
+    panel_bottom = 116
     if state == "TRACKING":
-        draw_check_panel(frame, score, grace_left, waiting)
+        panel_bottom = draw_check_panel(c, score, grace_left, 20, 140, waiting)
     elif state == "COUNTDOWN":
-        draw_check_panel(frame, score, None)
+        panel_bottom = draw_check_panel(c, score, None, 20, 140)
 
-    draw_motion_meter(frame, motion_val)
-    draw_progress_dots(frame, results, pose["index"] - 1 if pose else -1)
+    draw_motion_meter(c, motion_val, 20, h - 26)
+    draw_progress_dots(c, results, pose["index"] - 1 if pose else -1, 20, h - 62)
 
     if state == "IDLE":
         bx0, by0, bx1, by1 = start_button_rect(w, h)
-        cv2.rectangle(frame, (bx0, by0), (bx1, by1), (0, 220, 255), -1)
-        cv2.rectangle(frame, (bx0, by0), (bx1, by1), (0, 0, 0), 2)
-        cv2.putText(frame, "CLICK START", (bx0 + 35, by0 + 27), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
-        cv2.putText(frame, "or press SPACE", (bx0 + 45, by0 + 45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (30, 30, 30), 1)
-        cv2.putText(frame, "10 POSES - HOLD EACH FOR 10s", (w // 2 - 340, h // 2 - 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 220, 255), 3)
-        cv2.putText(frame, f"Match the target skeleton, stay still. {REQUIRED_POSES}/{len(poses)} clears the gauntlet.",
-                    (w // 2 - 330, h // 2 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
-        cv2.putText(frame, "Stand back so your whole body is in frame. N = skip pose, R = restart, Q = quit.",
-                    (w // 2 - 330, h // 2 + 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
+        c.panel((bx0, by0, bx1, by1), fill=BLUE, fill_alpha=255, outline=BG_BLACK, width=2, corners=False)
+        c.centered_text((bx0 + bx1) // 2, by0 + 12, "CLICK START", size=20, color=BG_BLACK, weight="ExtraBold", tracking=2)
+        c.centered_text((bx0 + bx1) // 2, by0 + 34, "or press SPACE", size=12, color=BG_BLACK, weight="Medium")
+        c.centered_text(w // 2, h // 2 - 60, "10 POSES - HOLD EACH FOR 10s", size=36, color=BLUE, weight="ExtraBold", tracking=3)
+        c.centered_text(w // 2, h // 2 - 10,
+                         f"MATCH THE TARGET SKELETON, STAY STILL. {REQUIRED_POSES}/{len(poses)} CLEARS THE GAUNTLET.",
+                         size=15, color=GREY, weight="Medium", tracking=1)
+        c.centered_text(w // 2, h // 2 + 20,
+                         "STAND BACK SO YOUR WHOLE BODY IS IN FRAME. N = SKIP POSE, R = RESTART, Q = QUIT.",
+                         size=13, color=DIM, weight="Medium")
     elif state == "COUNTDOWN":
         secs = max(1, int(np.ceil(timer_remaining)))
-        cv2.putText(frame, f"{secs}", (w // 2 - 45, h // 2 + 50),
-                    cv2.FONT_HERSHEY_SIMPLEX, 4.5, (255, 220, 0), 11)
-        cv2.putText(frame, f"GET INTO: {pose['name'].upper()}", (w // 2 - 290, h // 2 + 120),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        c.centered_text(w // 2, h // 2 - 10, str(secs), size=140, color=AMBER, weight="ExtraBold")
+        c.centered_text(w // 2, h // 2 + 130, f"GET INTO: {pose['name'].upper()}", size=24, color=WHITE, weight="Bold", tracking=2)
     elif state == "TRACKING":
-        cv2.putText(frame, f"{hold_remaining:.1f}", (w // 2 - 90, h // 2 + 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 3.5, (0, 255, 0), 9)
+        c.centered_text(w // 2, h // 2 - 10, f"{hold_remaining:.1f}", size=110, color=GREEN, weight="ExtraBold")
         frac = 1.0 - hold_remaining / POSE_HOLD_DURATION
-        bx, by, bw, bh = w // 2 - 200, h // 2 + 80, 400, 18
-        cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (60, 60, 60), -1)
-        cv2.rectangle(frame, (bx, by), (int(bx + bw * frac), by + bh), (0, 255, 0), -1)
-        cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (255, 255, 255), 1)
+        bx, by, bw, bh = w // 2 - 200, h // 2 + 90, 400, 16
+        c.rect((bx, by, bx + bw, by + bh), fill=DIM)
+        if frac > 0:
+            c.rect((bx, by, int(bx + bw * frac), by + bh), fill=GREEN)
+        c.rect((bx, by, bx + bw, by + bh), outline=WHITE, width=1)
     elif state == "POSE_FAILED":
-        cv2.putText(frame, "POSE BROKEN", (w // 2 - 220, h // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 255), 4)
-        cv2.putText(frame, "Next pose coming up...", (w // 2 - 150, h // 2 + 45),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        c.centered_text(w // 2, h // 2 - 30, "POSE BROKEN", size=42, color=RED, weight="ExtraBold", tracking=3)
+        c.centered_text(w // 2, h // 2 + 30, "NEXT POSE COMING UP...", size=16, color=WHITE, weight="Medium", tracking=1)
     elif state == "POSE_PASSED":
-        cv2.putText(frame, "HELD - POSE SECURED", (w // 2 - 300, h // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 255, 128), 4)
-        cv2.putText(frame, "Next pose coming up...", (w // 2 - 150, h // 2 + 45),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        c.centered_text(w // 2, h // 2 - 30, "POSE SECURED", size=42, color=GREEN, weight="ExtraBold", tracking=3)
+        c.centered_text(w // 2, h // 2 + 30, "NEXT POSE COMING UP...", size=16, color=WHITE, weight="Medium", tracking=1)
+
+    return c.finish()
 
 # ==========================================
 # MAIN GAME LOOP
@@ -870,24 +872,224 @@ def run_game():
                     token = sys.argv[1]
                     room_id = sys.argv[2]
                     try:
+                        # Reports pass/fail only. The ML service forwards this to
+                        # Supabase, which stamps the completion time, so the run is
+                        # timed by the same clock as every other room.
                         requests.post(
-                            "http://127.0.0.1:5000/api/game/validate",
+                            "http://127.0.0.1:5000/api/ml/report",
                             headers={"Authorization": f"Bearer {token}"},
-                            json={"roomId": room_id, "elapsedSeconds": POSE_HOLD_DURATION + 1}
+                            json={
+                                "roomId": room_id,
+                                "passed": True,
+                                "detail": {
+                                    "posesCleared": sum(1 for r in results if r),
+                                    "posesRequired": REQUIRED_POSES,
+                                    "holdSeconds": POSE_HOLD_DURATION,
+                                },
+                            },
+                            timeout=10,
                         )
                     except: pass
                 # Auto-close after 3 seconds of winning
                 if now - phase_start > 3.0:
                     break
         hud_pose = pose_on_screen()
-        draw_hud(frame, state, hud_pose, score if hud_pose is active_pose else None,
-                 motion, max(timer_remaining, 0.0), hold_remaining, grace_left, results, poses,
-                 waiting=waiting)
+        frame = draw_hud(frame, state, hud_pose, score if hud_pose is active_pose else None,
+                          motion, max(timer_remaining, 0.0), hold_remaining, grace_left, results, poses,
+                          waiting=waiting)
 
         cv2.imshow(WINDOW_NAME, frame)
 
     cap.release()
     cv2.destroyAllWindows()
+
+
+
+# =============================================================================
+# Kiosk streaming mode
+# =============================================================================
+# The kiosk browser cannot embed a native cv2.imshow() window, so this is a
+# second entry point that reuses every bit of the detection/scoring/HUD logic
+# above but yields MJPEG frames instead of opening a desktop window. Flask
+# wraps this generator in a multipart/x-mixed-replace response and the browser
+# displays it with a plain <img> tag - no video-streaming library needed on
+# either side.
+#
+# run_game() above is left completely untouched: `python louvre_laser_game.py`
+# still opens a native window for standalone development and testing per
+# AGENTS.md. This function is only ever called from inside the Flask process.
+#
+# Differences from run_game(), all forced by having no keyboard/mouse and no
+# native window:
+#   - Starts immediately in COUNTDOWN. There is no IDLE/click-to-start state -
+#     the kiosk's own "launch" click is what causes the browser to open this
+#     stream in the first place.
+#   - No key-driven skip/restart/quit. The sequence runs start to finish or
+#     until the viewer disconnects, at which point the generator is torn down
+#     and the camera is released in the `finally` block.
+# =============================================================================
+
+def _report_pose_result(token, room_id, passed, detail):
+    """Tell the Flask backend how the sequence went, exactly as run_game() does.
+
+    A plain loopback POST back into the same Flask process - safe only because
+    the server is run with threaded=True, so this request does not block the
+    stream's own still-open response.
+    """
+    import requests
+    try:
+        requests.post(
+            "http://127.0.0.1:5000/api/ml/report",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"roomId": room_id, "passed": passed, "detail": detail},
+            timeout=10,
+        )
+    except Exception as exc:
+        print(f"[WARN] Could not report pose result: {exc}")
+
+
+def stream_game_frames(token, room_id):
+    """Generator of MJPEG frame chunks for one crew's pose sequence.
+
+    Mirrors run_game()'s state machine and drawing calls one-for-one; the only
+    changes are the output sink (yield a JPEG instead of cv2.imshow) and the
+    absence of keyboard/mouse control (auto-start, no skip/restart).
+    """
+    print("[INFO] (stream) Loading YOLOv8-Pose model...")
+    model_path = os.path.join(BASE_DIR, "yolov8n-pose.pt")
+    model = YOLO(model_path)
+    poses = build_pose_sequence(model)
+
+    import sys as _sys
+    backend = cv2.CAP_DSHOW if _sys.platform.startswith('win') else cv2.CAP_ANY
+    cap = cv2.VideoCapture(0, backend)
+    if not cap.isOpened():
+        print("[ERROR] (stream) Could not open local webcam.")
+        return
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+    state, phase_start = "COUNTDOWN", time.time()
+    pose_idx = 0
+    results = []
+    held_time, hold_started, break_start = 0.0, False, None
+    last_tick = time.time()
+    prev_keypoints = None
+    start_game_time = time.time()
+    webhook_sent = False
+
+    def finish_pose(passed):
+        nonlocal state, phase_start, results, held_time, break_start, hold_started
+        results.append(passed)
+        held_time, break_start, hold_started = 0.0, None, False
+        state, phase_start = ("POSE_PASSED" if passed else "POSE_FAILED"), time.time()
+
+    def advance():
+        nonlocal state, phase_start, pose_idx
+        pose_idx += 1
+        if pose_idx >= len(poses):
+            state, phase_start = "SUMMARY", time.time()
+        else:
+            state, phase_start = "COUNTDOWN", time.time()
+
+    try:
+        while cap.isOpened():
+            success, frame = cap.read()
+            if not success:
+                break
+
+            frame = cv2.flip(frame, 1)
+            now = time.time()
+            dt = min(now - last_tick, 0.5)
+            last_tick = now
+            t = now - start_game_time
+
+            def pose_on_screen():
+                if state == "SUMMARY" or pose_idx >= len(poses):
+                    return None
+                return poses[pose_idx]
+
+            active_pose = pose_on_screen()
+            score, motion = None, 0.0
+
+            detection = model(frame, verbose=False)
+            if detection and detection[0].keypoints is not None and len(detection[0].keypoints.data) > 0:
+                kpts = detection[0].keypoints.data[0].cpu().numpy()
+                motion = compute_frame_motion(kpts, prev_keypoints, STILLNESS_ANCHORS)
+                prev_keypoints = kpts
+                if active_pose is not None:
+                    score = evaluate_pose(kpts, active_pose)
+                for x, y, conf in kpts:
+                    if conf > CONF_THRESHOLD:
+                        cv2.circle(frame, (int(x), int(y)), 4, (0, 255, 255), -1)
+            else:
+                prev_keypoints = None
+
+            timer_remaining, hold_remaining, grace_left, waiting = 0.0, POSE_HOLD_DURATION, None, False
+
+            if state == "COUNTDOWN":
+                timer_remaining = COUNTDOWN_DURATION - (now - phase_start)
+                if timer_remaining <= 0:
+                    state, phase_start = "TRACKING", now
+                    held_time, break_start, hold_started = 0.0, None, False
+            elif state == "TRACKING":
+                holding = score is not None and score["ok"] and motion <= MOTION_LIMIT
+                if holding:
+                    held_time += dt
+                    hold_started = True
+                    break_start = None
+                elif hold_started:
+                    if break_start is None:
+                        break_start = now
+                    grace_left = max(0.0, BREAK_GRACE - (now - break_start))
+
+                waiting = not hold_started
+                hold_remaining = max(0.0, POSE_HOLD_DURATION - held_time)
+                if held_time >= POSE_HOLD_DURATION:
+                    finish_pose(True)
+                elif break_start is not None and now - break_start > BREAK_GRACE:
+                    finish_pose(False)
+                elif now - phase_start > POSE_TIME_LIMIT:
+                    finish_pose(False)
+            elif state in ("POSE_PASSED", "POSE_FAILED"):
+                if now - phase_start >= RESULT_DISPLAY:
+                    advance()
+
+            if state in ("COUNTDOWN", "TRACKING"):
+                draw_laser_grid(frame, t, alarm=False)
+            elif state == "POSE_FAILED":
+                draw_laser_grid(frame, t, alarm=True)
+                cv2.addWeighted(np.full_like(frame, (0, 0, 200)), 0.4, frame, 0.6, 0, frame)
+            elif state == "POSE_PASSED":
+                cv2.addWeighted(np.full_like(frame, (0, 200, 0)), 0.3, frame, 0.7, 0, frame)
+            elif state == "SUMMARY":
+                won = sum(1 for r in results if r) >= REQUIRED_POSES
+                tint = (0, 200, 0) if won else (0, 0, 200)
+                cv2.addWeighted(np.full_like(frame, tint), 0.25, frame, 0.75, 0, frame)
+
+                if won and not webhook_sent:
+                    webhook_sent = True
+                    _report_pose_result(token, room_id, True, {
+                        "posesCleared": sum(1 for r in results if r),
+                        "posesRequired": REQUIRED_POSES,
+                        "holdSeconds": POSE_HOLD_DURATION,
+                    })
+
+                if now - phase_start > 3.0:
+                    break
+
+            hud_pose = pose_on_screen()
+            frame = draw_hud(frame, state, hud_pose, score if hud_pose is active_pose else None,
+                              motion, max(timer_remaining, 0.0), hold_remaining, grace_left, results, poses,
+                              waiting=waiting)
+
+            ok, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            if not ok:
+                continue
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+    finally:
+        cap.release()
+
 
 if __name__ == "__main__":
     run_game()

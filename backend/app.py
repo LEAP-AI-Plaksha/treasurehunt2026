@@ -1,8 +1,16 @@
-"""Unified Flask backend for the Louvre Heist game system.
+"""Flask ML service for the Louvre Heist.
 
-Serves all room terminals running on separate frontend ports.
-CORS is configured to accept requests from each terminal port defined in game_settings.json.
-All game rules - credentials, attempt limits, timers, clues - are loaded from config/game_settings.json.
+Auth, riddles, route order, scoring and all timing live in Supabase. What is
+left here is the work Supabase cannot do: torch and CLIP for the machine-graded
+rooms, Cloudflare image generation, and launching the OpenCV pose game.
+
+Crews authenticate with their Supabase JWT (see supabase_bridge.require_team_jwt),
+and results are reported to Supabase with record_ml_result() so that every room
+in the event is timed by the same clock.
+
+Superseded endpoints - /api/config/*, /api/auth/*, /api/game/state,
+/api/game/validate, /api/scores* - were removed; the frontend calls Supabase
+directly for those. See SUPABASE_BACKEND.md.
 """
 
 import os
@@ -23,6 +31,8 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 
 load_dotenv()
+
+from supabase_bridge import fetch_room_config, record_ml_result, require_team_jwt, team_code_from_token
 
 # ---------------------------------------------------------------------------
 # Load centralized settings
@@ -51,13 +61,9 @@ CORS(
 # In-memory state
 # ---------------------------------------------------------------------------
 
-# token -> { team_id, logged_in_at }
-ACTIVE_SESSIONS: dict[str, dict] = {}
-
-# "TEAM_ID__ROOM_ID" -> { attempts, completed, score }
-GAME_STATE: dict[str, dict] = {}
-
-# Memory-to-Image room: token -> { image_set, generated_left, generated_right }
+# Memory-to-Image room: team_code -> { image_set, generated_left, generated_right }
+# Keyed by team rather than by token: Supabase refreshes access tokens during a
+# run, so the token is not a stable identifier for a crew.
 IMAGE_SESSIONS: dict[str, dict] = {}
 
 os.makedirs(os.path.join(os.path.dirname(__file__), "static", "generated"), exist_ok=True)
@@ -66,24 +72,13 @@ os.makedirs(os.path.join(os.path.dirname(__file__), "static", "generated"), exis
 # Auth helpers
 # ---------------------------------------------------------------------------
 
-def _valid_teams() -> dict[str, str]:
-    """Return mapping of teamId -> passcode from config."""
-    return {t["teamId"]: t["passcode"] for t in GAME_SETTINGS["auth"]["teams"]}
 
-
-def require_auth(f):
-    """Decorator that validates the Bearer token and injects team_id."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            return jsonify({"success": False, "error": "Missing authorization token"}), 401
-        token = auth_header.split(" ", 1)[1].strip()
-        session = ACTIVE_SESSIONS.get(token)
-        if session is None:
-            return jsonify({"success": False, "error": "Invalid or expired token"}), 401
-        return f(session["team_id"], *args, **kwargs)
-    return decorated
+def _room_timer_seconds(room_code: str, fallback: int) -> int:
+    """Room timer from Supabase, falling back if the backend is unreachable."""
+    try:
+        return int(fetch_room_config(room_code)["timer_seconds"])
+    except Exception:
+        return fallback
 
 # ---------------------------------------------------------------------------
 # Routes - public
@@ -94,207 +89,87 @@ def health():
     return jsonify({"status": "ok", "event": GAME_SETTINGS["system"]["eventName"]})
 
 
-@app.route("/api/config/<room_id>", methods=["GET"])
-def get_room_config(room_id: str):
-    """Serve public room metadata - narrative text, timers, points.
-    The correct answer is never sent to the client.
-    """
-    room = GAME_SETTINGS["rooms"].get(room_id)
-    if not room:
-        return jsonify({"success": False, "error": "Room not found"}), 404
 
-    return jsonify({
-        "success": True,
-        "data": {
-            "terminalId":   room["terminalId"],
-            "label":        room["label"],
-            "coordinates":  room["coordinates"],
-            "briefing":     room["briefing"],
-            "hint":         room["hint"],
-            "points":       room["points"],
-            "timerSeconds": room["timerSeconds"],
-            "maxAttempts":  room.get("maxAttempts", GAME_SETTINGS["system"]["globalMaxAttempts"]),
-        },
-    })
-
-
-@app.route("/api/config/rooms", methods=["GET"])
-def list_rooms():
-    """Return the list of room IDs and their ports for discovery."""
-    rooms_summary = {
-        room_id: {"port": cfg["port"], "label": cfg["label"], "terminalId": cfg["terminalId"]}
-        for room_id, cfg in GAME_SETTINGS["rooms"].items()
-    }
-    return jsonify({"success": True, "rooms": rooms_summary})
-
-# ---------------------------------------------------------------------------
-# Routes - auth
-# ---------------------------------------------------------------------------
-
-@app.route("/api/auth/login", methods=["POST"])
-def team_login():
-    """Authenticate team credentials and issue a session token."""
-    data = request.get_json(silent=True) or {}
-    team_id = data.get("teamId", "").strip().upper()
-    passcode = data.get("passcode", "").strip()
-
-    valid = _valid_teams()
-    if team_id not in valid or valid[team_id] != passcode:
-        return jsonify({"success": False, "error": "Invalid Team ID or password"}), 401
-
-    token = f"heist_{team_id}_{uuid.uuid4().hex[:12]}"
-    ACTIVE_SESSIONS[token] = {
-        "team_id": team_id,
-        "logged_in_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    return jsonify({
-        "success": True,
-        "token": token,
-        "teamId": team_id,
-        "message": f"Authentication granted. Welcome, {team_id}.",
-    })
-
-
-@app.route("/api/auth/logout", methods=["POST"])
-@require_auth
-def team_logout(team_id: str):
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.split(" ", 1)[1].strip()
-    ACTIVE_SESSIONS.pop(token, None)
-    return jsonify({"success": True})
-
-# ---------------------------------------------------------------------------
-# Routes - game state
-# ---------------------------------------------------------------------------
-
-@app.route("/api/game/state/<room_id>", methods=["GET"])
-@require_auth
-def get_game_state(team_id: str, room_id: str):
-    """Return current attempt count and completion status for this team/room."""
-    room = GAME_SETTINGS["rooms"].get(room_id)
-    if not room:
-        return jsonify({"success": False, "error": "Room not found"}), 404
-
-    key = f"{team_id}__{room_id}"
-    state = GAME_STATE.get(key, {"attempts": 0, "completed": False, "score": 0})
-    max_attempts = room.get("maxAttempts", GAME_SETTINGS["system"]["globalMaxAttempts"])
-
-    return jsonify({
-        "success": True,
-        "attempts": state["attempts"],
-        "attemptsRemaining": max(0, max_attempts - state["attempts"]),
-        "completed": state["completed"],
-        "score": state["score"],
-        "lockout": state["attempts"] >= max_attempts and not state["completed"],
-    })
-
-
-@app.route("/api/game/validate", methods=["POST"])
-@require_auth
-def validate_task(team_id: str):
-    """Validate puzzle answer or hold-timer for the specified room.
-
-    Body:
-      roomId          - room identifier string
-      submission      - text answer (optional, used for answer-based rooms)
-      elapsedSeconds  - float, used for timer-based rooms
-    """
-    data = request.get_json(silent=True) or {}
-    room_id = data.get("roomId", "")
-    submission = data.get("submission", "")
-    elapsed = float(data.get("elapsedSeconds", 0))
-
-    room = GAME_SETTINGS["rooms"].get(room_id)
-    if not room:
-        return jsonify({"success": False, "error": "Invalid room"}), 400
-
-    key = f"{team_id}__{room_id}"
-    state = GAME_STATE.setdefault(key, {"attempts": 0, "completed": False, "score": 0})
-
-    # Already cleared
-    if state["completed"]:
-        return jsonify({
-            "success": True,
-            "completed": True,
-            "message": "Room already cleared.",
-            "clue": room["successClue"],
-        })
-
-    max_attempts = room.get("maxAttempts", GAME_SETTINGS["system"]["globalMaxAttempts"])
-
-    # Lockout check
-    if state["attempts"] >= max_attempts:
-        return jsonify({
-            "success": False,
-            "lockout": True,
-            "error": "Maximum attempts exceeded. Terminal locked.",
-        }), 403
-
-    state["attempts"] += 1
-
-    # Validation logic
-    correct_answer = room.get("correctAnswer")
-    is_success = False
-
-    if correct_answer is None:
-        # Timer-based or open-input rooms (Yoga Room, H2 Lounge, Nose Draw)
-        target = float(room["timerSeconds"])
-        if elapsed >= target - 0.5:
-            is_success = True
-        elif len(str(submission).strip()) >= 10:
-            # H2 Lounge / Nose Draw: accept non-empty description
-            is_success = True
-    else:
-        # Exact match (case-insensitive, stripped)
-        is_success = str(submission).strip().upper() == str(correct_answer).strip().upper()
-
-    if is_success:
-        state["completed"] = True
-        state["score"] = room["points"]
-        return jsonify({
-            "success": True,
-            "completed": True,
-            "points": room["points"],
-            "clue": room["successClue"],
-            "message": "Bypass verified. Security protocol unlocked.",
-        })
-
-    remaining = max_attempts - state["attempts"]
-    return jsonify({
-        "success": False,
-        "completed": False,
-        "attemptsRemaining": remaining,
-        "lockout": remaining <= 0,
-        "error": f"Verification failed. {remaining} attempt(s) remaining.",
-    }), 400
 
 
 @app.route("/api/game/launch", methods=["POST"])
-@require_auth
+@require_team_jwt
 def launch_game(team_id: str):
-    """Launch an external python game script (like the OpenCV laser grid)."""
-    import subprocess, sys
+    """Deprecated for YOGA_ROOM: the pose game now streams into the kiosk page
+    via /api/game/video_feed instead of spawning a native window (see below).
+    Kept for any future room whose module genuinely needs its own OS process.
+    """
     data = request.get_json(silent=True) or {}
     room_id = data.get("roomId", "")
-    
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.split(" ", 1)[1].strip()
+    return jsonify({"success": False, "error": f"No external module configured for {room_id or 'this room'}."}), 400
 
-    if room_id == "YOGA_ROOM":
-        script_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        script_path = os.path.join(script_dir, "louvre_laser_game (1).py")
-        subprocess.Popen([sys.executable, script_path, token, room_id], cwd=script_dir)
-        return jsonify({"success": True, "message": "Laser grid module initialized."})
-    
-    return jsonify({"success": False, "error": "No external module configured for this room."}), 400
+
+@app.route("/api/game/video_feed", methods=["GET"])
+def game_video_feed():
+    """MJPEG stream of the live pose-tracking session, embedded via <img src=...>.
+
+    An <img> tag cannot send an Authorization header, so the crew's token
+    travels as a query parameter instead - the same JWT that would otherwise go
+    in the header, verified the same way by require_team_jwt's underlying check.
+    """
+    token = request.args.get("token", "")
+    room_id = request.args.get("roomId", "")
+    if not token or not room_id:
+        return jsonify({"success": False, "error": "token and roomId are required"}), 400
+
+    try:
+        team_code_from_token(token)
+    except Exception as exc:
+        return jsonify({"success": False, "error": f"Invalid token: {exc}"}), 401
+
+    import sys as _sys
+    script_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if script_dir not in _sys.path:
+        _sys.path.insert(0, script_dir)
+    from louvre_laser_game import stream_game_frames
+
+    return app.response_class(
+        stream_game_frames(token, room_id),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+    )
+
+# ---------------------------------------------------------------------------
+# Routes - machine-graded results
+# ---------------------------------------------------------------------------
+
+@app.route("/api/ml/report", methods=["POST"])
+@require_team_jwt
+def ml_report(team_id: str):
+    """Report the outcome of a machine-graded room to Supabase.
+
+    Used by the OpenCV pose game and the CLIP-scored rooms. Flask decides only
+    pass/fail; Supabase stamps completed_at, awards the points and enforces the
+    attempt limit, so a crew cannot be timed by a different clock in one room.
+    """
+    data = request.get_json(silent=True) or {}
+    room_id = data.get("roomId", "")
+    if not room_id:
+        return jsonify({"success": False, "error": "roomId is required"}), 400
+
+    passed = bool(data.get("passed", False))
+    detail = data.get("detail") or {}
+    if not isinstance(detail, dict):
+        detail = {"value": detail}
+
+    try:
+        result = record_ml_result(team_id, room_id, passed, detail)
+    except Exception as exc:
+        return jsonify({"success": False, "error": f"Could not record result: {exc}"}), 502
+
+    return jsonify(result)
+
 
 # ---------------------------------------------------------------------------
 # Routes - Memory-to-Image room (H2 Lounge) - image generation pipeline
 # ---------------------------------------------------------------------------
 
 @app.route("/api/memory/images", methods=["POST"])
-@require_auth
+@require_team_jwt
 def memory_images(team_id: str):
     """Pick a random image pair for the memory phase."""
     image_dir = os.path.join(os.path.dirname(__file__), "static", "images")
@@ -312,26 +187,22 @@ def memory_images(team_id: str):
     pair = random.sample(pool, 2)
     image_set = {"left": pair[0], "right": pair[1]}
 
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.split(" ", 1)[1].strip()
-    IMAGE_SESSIONS[token] = {"image_set": image_set}
+    IMAGE_SESSIONS[team_id] = {"image_set": image_set}
 
     return jsonify({
         "success": True,
         "left": f"/static/images/{pair[0]}",
         "right": f"/static/images/{pair[1]}",
-        "displaySeconds": GAME_SETTINGS["rooms"]["H2_LOUNGE"]["timerSeconds"],
+        # Read from Supabase so the timer is not maintained in two places.
+        "displaySeconds": _room_timer_seconds("H2_LOUNGE", fallback=10),
     })
 
 
 @app.route("/api/memory/generate", methods=["POST"])
-@require_auth
+@require_team_jwt
 def memory_generate(team_id: str):
     """Generate images from team descriptions using Cloudflare Workers AI."""
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.split(" ", 1)[1].strip()
-
-    session = IMAGE_SESSIONS.get(token)
+    session = IMAGE_SESSIONS.get(team_id)
     if not session:
         return jsonify({"success": False, "error": "No active memory session"}), 400
 
@@ -381,45 +252,6 @@ def memory_generate(team_id: str):
     return jsonify({"success": True, "generatedLeft": generated["left"], "generatedRight": generated["right"]})
 
 
-# ---------------------------------------------------------------------------
-# Routes - leaderboard / scores
-# ---------------------------------------------------------------------------
-
-SCORES_FILE = os.path.join(os.path.dirname(__file__), "scores.json")
-
-
-def _load_scores() -> list:
-    if not os.path.exists(SCORES_FILE):
-        return []
-    try:
-        with open(SCORES_FILE, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except (json.JSONDecodeError, OSError):
-        return []
-
-
-def _save_scores(scores: list) -> None:
-    with open(SCORES_FILE, "w", encoding="utf-8") as fh:
-        json.dump(scores, fh, indent=2, ensure_ascii=False)
-
-
-@app.route("/api/scores", methods=["GET"])
-def get_scores():
-    """Return all team scores for the leaderboard."""
-    return jsonify(_load_scores())
-
-
-@app.route("/api/scores/summary", methods=["GET"])
-def get_score_summary():
-    """Return aggregated per-team scores across all rooms."""
-    summary: dict[str, int] = {}
-    for team_room_key, state in GAME_STATE.items():
-        if state["completed"]:
-            team_id = team_room_key.split("__")[0]
-            summary[team_id] = summary.get(team_id, 0) + state["score"]
-    ranked = sorted(summary.items(), key=lambda x: x[1], reverse=True)
-    return jsonify([{"teamId": tid, "totalScore": score} for tid, score in ranked])
-
 
 # ---------------------------------------------------------------------------
 # Main
@@ -432,4 +264,8 @@ if __name__ == "__main__":
     print(f"[*] Heist backend starting on http://{host}:{port}")
     print(f"[*] Config: {CONFIG_PATH}")
     print(f"[*] CORS origins: {len(allowed_origins)} allowed")
-    app.run(host=host, port=port, debug=debug)
+    # threaded=True is required: the video stream route makes a loopback
+    # POST back into this same process to report a win. On a single-threaded
+    # dev server that self-call would block waiting for a worker that is the
+    # one and only worker, currently busy serving the still-open stream.
+    app.run(host=host, port=port, debug=debug, threaded=True)

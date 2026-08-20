@@ -1,8 +1,9 @@
 // Type-safe loader for per-room config read from the backend API.
-// At runtime the frontend fetches config dynamically, so this file only
+// At runtime the frontend reads room config from Supabase, so this file only
 // holds the TypeScript types and the ROOM_ID constant derived from .env.local.
 
 export type RoomId =
+  | 'HUB'
   | 'YOGA_ROOM'
   | 'CTLC_LAB'
   | 'MUSIC_ROOM'
@@ -15,12 +16,16 @@ export type RoomId =
 export const CURRENT_ROOM_ID: RoomId =
   ((import.meta.env.VITE_ROOM_ID as string) || 'YOGA_ROOM') as RoomId
 
+/** True on the operator's hub terminal, which enrolls crews and closes out runs. */
+export const IS_HUB = CURRENT_ROOM_ID === 'HUB'
+
 // Global attempt limit shown in the UI while config loads.
-// The authoritative value is returned by /api/config/<room_id>.
+// The authoritative value comes from the rooms table in Supabase.
 export const DEFAULT_MAX_ATTEMPTS = 3
 
 // Local fallback labels used before the server config arrives.
 export const ROOM_LABELS: Record<RoomId, string> = {
+  HUB:            'OPERATIONS BASE',
   YOGA_ROOM:      'LASER GRID',
   CTLC_LAB:       'SILENT RELAY',
   MUSIC_ROOM:     'VOICE INTERCEPT',

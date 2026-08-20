@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import imgBackground from '@/imports/LaserGrid/73ecf9f6066a41d6d2daab627902dcec860f5ac3.png'
-import { gameApi, type RoomConfigData } from '@/services/api'
+import { gameApi, poseStreamUrl, type RoomConfigData } from '@/services/api'
 import { CURRENT_ROOM_ID, DEFAULT_MAX_ATTEMPTS, ROOM_LABELS, type RoomId } from '@/config/gameSettings'
 
 // ---------------------------------------------------------------------------
@@ -173,12 +173,10 @@ function IdleScreen({ label, terminalId, onAuthenticate }: { label: string; term
 
 function AuthModal({
   terminalId,
-  attemptsLeft,
   onSuccess,
   onCancel,
 }: {
   terminalId: string
-  attemptsLeft: number
   onSuccess: (teamId: string) => void
   onCancel: () => void
 }) {
@@ -201,11 +199,15 @@ function AuthModal({
       if (result.success) {
         onSuccess(id)
       } else {
-        const left = attemptsLeft - 1
-        setError(`ACCESS DENIED - ${left} ATTEMPT${left !== 1 ? 'S' : ''} REMAINING`)
+        // Login can fail for reasons that have nothing to do with attempts left
+        // in this room - wrong password, but also "check in at the hub first",
+        // "it isn't your turn for this room yet", or another terminal holding
+        // this crew's session. Show the server's actual reason rather than a
+        // generic message, and leave the modal open so the crew can read it and
+        // retry instead of the screen silently bouncing back to idle.
+        setError(result.error?.toUpperCase() ?? 'ACCESS DENIED')
         setShaking(true)
         setTimeout(() => setShaking(false), 600)
-        onCancel()
       }
     } catch {
       setError('NETWORK ERROR - BACKEND UNREACHABLE')
@@ -447,27 +449,78 @@ function ResolutionScreen({
 // Challenge: Yoga Room (Laser Grid) - timer hold
 // ---------------------------------------------------------------------------
 
-function YogaRoomChallenge({ roomId, timerSeconds, onSuccess, onFail }: { roomId: string; timerSeconds: number; onSuccess: (elapsed: number) => void; onFail: () => void }) {
-  const [phase, setPhase] = useState<'ready' | 'holding'>('ready')
+// ---------------------------------------------------------------------------
+// Manual answer fallback - shown on every module-backed challenge so a room
+// is never blocked on a camera, an iframe, or an image-generation service that
+// isn't running. The server is the source of truth for whether an answer is
+// right (or, in rehearsal mode, accepts anything) - this is just another way
+// to reach submit_answer, not a second grading path.
+// ---------------------------------------------------------------------------
+
+function ManualAnswerFallback({
+  onSubmit,
+  label = 'MODULE UNAVAILABLE - ENTER ANSWER MANUALLY',
+}: {
+  onSubmit: (text: string) => void
+  label?: string
+}) {
+  const [value, setValue] = useState('')
+  const submit = () => {
+    const text = value.trim()
+    if (text) onSubmit(text)
+  }
+  return (
+    <div className="mt-6 w-full max-w-md mx-auto border-t border-[#337DFF]/20 pt-6">
+      <div className="font-mono text-[9px] text-[#669EFF]/60 tracking-[0.3em] mb-2 text-center">{label}</div>
+      <div className="flex gap-2">
+        <input
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && submit()}
+          placeholder="TYPE ANSWER"
+          autoFocus
+          className="flex-1 bg-[#0a0f1e] border border-[#337DFF]/40 px-3 py-2 font-mono text-xs text-white tracking-widest placeholder:text-[#337DFF]/25 focus:outline-none focus:border-[#337DFF] transition-colors"
+        />
+        <button
+          onClick={submit}
+          disabled={!value.trim()}
+          className="bg-[#337DFF]/20 border border-[#337DFF]/50 px-4 py-2 font-mono text-xs text-white tracking-widest hover:bg-[#337DFF]/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-95"
+        >
+          SUBMIT
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function YogaRoomChallenge({ roomId, timerSeconds, onSuccess, onManualSubmit }: { roomId: string; timerSeconds: number; onSuccess: (elapsed: number) => void; onManualSubmit: (text: string) => void }) {
+  const [phase, setPhase] = useState<'ready' | 'loading' | 'streaming' | 'error'>('ready')
+  const [streamUrl, setStreamUrl] = useState<string | null>(null)
   const [error, setError] = useState('')
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const handleStart = async () => {
     if (phase !== 'ready') return
-    const res = await gameApi.launchGame(roomId)
-    if (res.success) {
-      setPhase('holding')
-      // start polling for state changes
-      intervalRef.current = setInterval(async () => {
-        const stateRes = await gameApi.getGameState(roomId)
-        if (stateRes.success && stateRes.completed) {
-          clearInterval(intervalRef.current!)
-          onSuccess(timerSeconds)
-        }
-      }, 2000)
-    } else {
-      setError(res.error || 'Failed to launch camera module.')
+    setPhase('loading')
+    const url = await poseStreamUrl(roomId)
+    if (!url) {
+      setError('Not signed in - cannot open the camera feed.')
+      setPhase('error')
+      return
     }
+    // The <img> tag itself is what triggers Flask to open the camera and start
+    // the sequence - there is no separate "launch" call. Loading the model and
+    // opening the webcam takes a few seconds on a cold start; the <img>'s
+    // onLoad only fires once the first frame actually arrives.
+    setStreamUrl(url)
+
+    intervalRef.current = setInterval(async () => {
+      const stateRes = await gameApi.getGameState(roomId)
+      if (stateRes.success && stateRes.completed) {
+        clearInterval(intervalRef.current!)
+        onSuccess(timerSeconds)
+      }
+    }, 2000)
   }
 
   useEffect(() => () => clearInterval(intervalRef.current!), [])
@@ -483,23 +536,35 @@ function YogaRoomChallenge({ roomId, timerSeconds, onSuccess, onFail }: { roomId
         <div className="text-red-500 font-mono text-xs">{error}</div>
       )}
 
-      {phase === 'ready' ? (
+      {phase === 'ready' && (
         <button
           onClick={handleStart}
           className="border-2 px-16 py-6 font-mono font-bold text-sm tracking-[0.3em] transition-all duration-100 active:scale-95 cursor-pointer border-[#337DFF] text-white hover:bg-[#337DFF]/10"
         >
           LAUNCH CAMERA MODULE
         </button>
-      ) : (
-        <div className="border border-[#00FF88]/40 bg-[#00FF88]/05 p-8 text-center animate-pulse">
-          <div className="font-mono text-[9px] text-[#00FF88] tracking-[0.3em] mb-4 opacity-70">CAMERA ACTIVE</div>
-          <p className="font-mono text-sm text-[#00FF88] leading-relaxed tracking-wide">
-            PLEASE STAND IN FRONT OF THE CAMERA.<br />
-            MATCH THE ON-SCREEN POSES AND HOLD THEM.<br />
-            AWAITING SYSTEM VERIFICATION...
+      )}
+
+      {phase === 'loading' && (
+        <div className="border border-[#337DFF]/40 bg-[#337DFF]/05 p-8 text-center animate-pulse">
+          <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.3em] mb-2 opacity-70">INITIALISING</div>
+          <p className="font-mono text-sm text-[#337DFF] tracking-wide">
+            LOADING POSE MODEL AND OPENING CAMERA - A FEW SECONDS...
           </p>
         </div>
       )}
+
+      {(phase === 'loading' || phase === 'streaming') && streamUrl && (
+        <img
+          src={streamUrl}
+          alt="Live pose tracking feed"
+          onLoad={() => setPhase('streaming')}
+          onError={() => { setError('Camera module failed to start. Type your answer below instead.'); setPhase('error') }}
+          className="border border-[#00FF88]/40 max-w-full max-h-[60vh]"
+        />
+      )}
+
+      <ManualAnswerFallback onSubmit={onManualSubmit} />
     </div>
   )
 }
@@ -520,13 +585,14 @@ function CTLCLabChallenge({ config, onSuccess, onFail }: { config: RoomConfigDat
   }, [onSuccess]);
 
   return (
-    <div className="flex flex-col items-center justify-center h-full w-full">
+    <div className="flex flex-col items-center h-full w-full overflow-y-auto">
       <iframe
         src="/sign_language_asl.html"
-        className="w-full h-full max-w-5xl mx-auto border-none bg-transparent"
+        className="w-full h-[70%] max-w-5xl mx-auto border-none bg-transparent flex-shrink-0"
         allow="camera"
         title="Sign Language Challenge"
       />
+      <ManualAnswerFallback onSubmit={onSuccess} />
     </div>
   )
 }
@@ -637,7 +703,7 @@ function MusicRoomChallenge({ onSuccess, onFail }: { onSuccess: (submission: str
 // Challenge: H2 Lounge (Memory + Description)
 // ---------------------------------------------------------------------------
 
-function H2LoungeChallenge({ timerSeconds, onSuccess, onFail }: { timerSeconds: number; onSuccess: () => void; onFail: () => void }) {
+function H2LoungeChallenge({ timerSeconds, onSuccess }: { timerSeconds: number; onSuccess: (submission?: string) => void }) {
   const [phase, setPhase] = useState<'loading' | 'viewing' | 'input' | 'generating' | 'done'>('loading')
   const [countdown, setCountdown] = useState(timerSeconds)
   const [images, setImages] = useState<{ left: string; right: string }>({ left: '', right: '' })
@@ -710,6 +776,13 @@ function H2LoungeChallenge({ timerSeconds, onSuccess, onFail }: { timerSeconds: 
       </div>
 
       {error && <div className="text-[#FF3333] font-mono text-xs">{error}</div>}
+
+      {(phase === 'loading' || phase === 'input') && (
+        <ManualAnswerFallback
+          label="RECONSTRUCTION SERVICE UNAVAILABLE - DESCRIBE THE ARTEFACT DIRECTLY"
+          onSubmit={onSuccess}
+        />
+      )}
 
       {phase === 'loading' && (
         <div className="text-[#337DFF] font-mono text-sm tracking-widest animate-pulse">FETCHING CLASSIFIED INTEL...</div>
@@ -811,13 +884,14 @@ function H2LoungeChallenge({ timerSeconds, onSuccess, onFail }: { timerSeconds: 
 // Challenge: Classroom 1101 (Neural Bypass)
 // ---------------------------------------------------------------------------
 
-function ClassroomChallenge({ onSuccess, onFail }: { onSuccess: (submission: string) => void; onFail: () => void }) {
+function ClassroomChallenge({ onSuccess }: { onSuccess: (submission: string) => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-8">
       <div className="text-center">
         <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.4em] opacity-70 mb-2">NEURAL NETWORK BYPASS</div>
-        <h3 className="text-xl font-bold text-[#aabddd] tracking-widest animate-pulse">AWAITING EXTERNAL VERIFICATION...</h3>
+        <h3 className="text-xl font-bold text-white tracking-widest">SUBMIT THE INJECTION SIGNATURE</h3>
       </div>
+      <ManualAnswerFallback label="ENTER THE BYPASS VALUES" onSubmit={onSuccess} />
     </div>
   )
 }
@@ -928,7 +1002,7 @@ function ActiveScreen({
             roomId={roomId}
             timerSeconds={config.timerSeconds}
             onSuccess={elapsed => onSuccess({ elapsedSeconds: elapsed })}
-            onFail={onFail}
+            onManualSubmit={submission => onSuccess({ submission })}
           />
         )}
         {roomId === 'CTLC_LAB' && (
@@ -947,14 +1021,12 @@ function ActiveScreen({
         {roomId === 'H2_LOUNGE' && (
           <H2LoungeChallenge
             timerSeconds={config.timerSeconds}
-            onSuccess={() => onSuccess({ submission: "FLUX_SUCCESS" })}
-            onFail={onFail}
+            onSuccess={submission => onSuccess({ submission: submission ?? 'FLUX_SUCCESS' })}
           />
         )}
         {roomId === 'CLASSROOM_1101' && (
           <ClassroomChallenge
             onSuccess={submission => onSuccess({ submission })}
-            onFail={onFail}
           />
         )}
         {roomId === 'NOSE_DRAW' && (
@@ -1088,7 +1160,6 @@ export default function App() {
           <IdleScreen label={label} terminalId={terminalId} onAuthenticate={() => {}} />
           <AuthModal
             terminalId={terminalId}
-            attemptsLeft={attemptsLeft}
             onSuccess={handleAuthSuccess}
             onCancel={() => setScreen('idle')}
           />
