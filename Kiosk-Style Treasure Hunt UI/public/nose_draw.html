@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nose Draw — Circle Challenge</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --border: #262b33;
+    --text: #e8eaed;
+    --muted: #8a93a3;
+    --accent: #4da3ff;
+    --green: #22c55e;
+    --green-glow: rgba(34, 197, 94, 0.55);
+    --amber: #eab308;
+    --amber-glow: rgba(234, 179, 8, 0.5);
+    --red: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px 40px;
+  }
+  h1 {
+    font-size: 22px;
+    margin: 0 0 4px;
+    letter-spacing: 0.2px;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 0 0 18px;
+    text-align: center;
+  }
+  .status-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .pill.score { font-variant-numeric: tabular-nums; min-width: 108px; justify-content: center; }
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #55606f;
+    transition: background 120ms ease, box-shadow 120ms ease;
+  }
+  .dot.on {
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green-glow);
+  }
+  .dot.warn {
+    background: var(--amber);
+    box-shadow: 0 0 8px var(--amber-glow);
+  }
+  .dot.off {
+    background: var(--red);
+  }
+  .stage {
+    position: relative;
+    width: min(92vw, 900px);
+    aspect-ratio: 4 / 3;
+    background: #000;
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+  }
+  video { display: none; }
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .flash-overlay {
+    position: absolute;
+    inset: 0;
+    background: var(--green);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .flash-overlay.flashing {
+    animation: flashPulse 700ms ease-out;
+  }
+  @keyframes flashPulse {
+    0%   { opacity: 0.85; }
+    100% { opacity: 0; }
+  }
+  .start-layer {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 12, 15, 0.92);
+    flex-direction: column;
+    gap: 14px;
+    text-align: center;
+    padding: 24px;
+  }
+  .start-layer.hidden { display: none; }
+  .start-layer p {
+    color: var(--muted);
+    font-size: 13px;
+    max-width: 420px;
+    margin: 0;
+  }
+  button {
+    font: inherit;
+    font-weight: 600;
+    font-size: 15px;
+    padding: 12px 22px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+    background: var(--accent);
+    color: #041018;
+    transition: transform 80ms ease, opacity 120ms ease;
+  }
+  button:hover { opacity: 0.9; }
+  button:active { transform: scale(0.97); }
+  button.secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+  }
+  .error-box {
+    margin-top: 14px;
+    max-width: 900px;
+    width: min(92vw, 900px);
+    background: #2a1414;
+    border: 1px solid #5c2323;
+    color: #ffb4b4;
+    padding: 12px 16px;
+    border-radius: 10px;
+    font-size: 13px;
+    white-space: pre-wrap;
+    display: none;
+  }
+  .error-box.show { display: block; }
+  .hint {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 14px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+  <h1>🎯 Nose Draw — Circle Challenge</h1>
+  <p class="subtitle">Trace a circle around the target point with your nose. You need 90%+ accuracy to pass.</p>
+
+  <div class="status-row">
+    <div class="pill"><span class="dot" id="dotCamera"></span><span id="labelCamera">Camera off</span></div>
+    <div class="pill"><span class="dot" id="dotFace"></span><span id="labelFace">No face</span></div>
+    <div class="pill score"><span class="dot" id="dotScore"></span><span id="labelScore">Score: —</span></div>
+  </div>
+
+  <div class="stage">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <div class="flash-overlay" id="flashOverlay"></div>
+
+    <div class="start-layer" id="startLayer">
+      <div style="font-size:34px;">📷</div>
+      <div style="font-weight:600;">Camera is off</div>
+      <p>Click start, then approve your browser's camera permission popup.
+         Nothing installs, nothing leaves your machine except the one-time model download.</p>
+      <button id="startBtn">Start Camera</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="secondary" id="resetBtn">Reset (R)</button>
+    <button class="secondary" id="stopBtn">Stop Camera</button>
+  </div>
+
+  <div class="error-box" id="errorBox"></div>
+
+  <p class="hint">All tracking runs locally in your browser (no Python, no OpenCV, no camera-permission dance).</p>
+
+<script type="module">
+import {
+  FaceLandmarker,
+  FilesetResolver,
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
+
+const video   = document.getElementById("video");
+const canvas  = document.getElementById("canvas");
+const ctx     = canvas.getContext("2d");
+const flashOverlay = document.getElementById("flashOverlay");
+const startLayer   = document.getElementById("startLayer");
+const startBtn     = document.getElementById("startBtn");
+const resetBtn     = document.getElementById("resetBtn");
+const stopBtn      = document.getElementById("stopBtn");
+const errorBox     = document.getElementById("errorBox");
+
+const dotCamera = document.getElementById("dotCamera");
+const labelCamera = document.getElementById("labelCamera");
+const dotFace = document.getElementById("dotFace");
+const labelFace = document.getElementById("labelFace");
+const dotScore = document.getElementById("dotScore");
+const labelScore = document.getElementById("labelScore");
+
+const NOSE_TIP_IDX = 1;
+const TRAIL_MAX = 200;
+const SMOOTHING = 0.4;
+const PASS_THRESHOLD = 90;        // percent
+const HOLD_FRAMES_REQUIRED = 6;   // consecutive passing frames needed before it counts
+const CLEAR_PAUSE_MS = 1800;
+
+let faceLandmarker = null;
+let stream = null;
+let rafId = null;
+let trail = [];
+let smoothed = null;
+let phase = "DRAWING"; // DRAWING | SUCCESS
+let holdFrames = 0;
+let target = null; // {x, y} in canvas space, set once the canvas has real dimensions
+
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.classList.add("show");
+}
+function clearError() {
+  errorBox.classList.remove("show");
+  errorBox.textContent = "";
+}
+
+async function initModel() {
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+  );
+  faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+      delegate: "GPU",
+    },
+    runningMode: "VIDEO",
+    numFaces: 1,
+  });
+}
+
+async function startCamera() {
+  clearError();
+  startBtn.disabled = true;
+  startBtn.textContent = "Starting…";
+  try {
+    if (!faceLandmarker) {
+      await initModel();
+    }
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 1280, height: 960 },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 960;
+    target = { x: canvas.width / 2, y: canvas.height / 2 };
+
+    dotCamera.classList.add("on");
+    dotCamera.classList.remove("off");
+    labelCamera.textContent = "Camera live";
+    startLayer.classList.add("hidden");
+
+    resetAttempt();
+
+    rafId = requestAnimationFrame(renderLoop);
+  } catch (err) {
+    dotCamera.classList.remove("on");
+    dotCamera.classList.add("off");
+    labelCamera.textContent = "Camera blocked";
+    showError(
+      "Couldn't start the camera: " + (err && err.message ? err.message : err) +
+      "\n\nCheck your browser's site permissions (the camera icon in the address bar) " +
+      "and make sure this page is allowed to use the camera."
+    );
+  } finally {
+    startBtn.disabled = false;
+    startBtn.textContent = "Start Camera";
+  }
+}
+
+function stopCamera() {
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = null;
+  if (stream) {
+    stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+  }
+  dotCamera.classList.remove("on");
+  dotCamera.classList.add("off");
+  labelCamera.textContent = "Camera off";
+  dotFace.classList.remove("on", "off");
+  labelFace.textContent = "No face";
+  startLayer.classList.remove("hidden");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function resetAttempt() {
+  trail = [];
+  smoothed = null;
+  holdFrames = 0;
+  phase = "DRAWING";
+  updateScoreUI(null);
+}
+
+function flashGreen() {
+  flashOverlay.classList.remove("flashing");
+  void flashOverlay.offsetWidth; // restart animation
+  flashOverlay.classList.add("flashing");
+}
+
+function updateScoreUI(percent) {
+  dotScore.classList.remove("on", "warn", "off");
+  if (percent === null) {
+    labelScore.textContent = "Score: —";
+    return;
+  }
+  labelScore.textContent = `Score: ${Math.round(percent)}%`;
+  if (percent >= PASS_THRESHOLD) dotScore.classList.add("on");
+  else if (percent >= 60) dotScore.classList.add("warn");
+  else dotScore.classList.add("off");
+}
+
+// ── Circularity scoring around the fixed target point ──────────────────────
+// Combines four independent signals into one 0-100% score:
+//   - radius consistency (low variance in distance-to-target = round, not lumpy)
+//   - angular coverage (must sweep close to a full 360° turn)
+//   - direction consistency (steady rotation, not scribbled back and forth)
+//   - closure (ends near where it started)
+function scoreCircle(points, cx, cy, minDim) {
+  if (points.length < 8) return null; // just enough to compute an angle delta
+
+  const radii = points.map((p) => Math.hypot(p[0] - cx, p[1] - cy));
+  const avgRadius = radii.reduce((a, b) => a + b, 0) / radii.length;
+
+  // Too tiny a loop around the point isn't a deliberate circle attempt.
+  if (avgRadius < minDim * 0.12) return { percent: 0, avgRadius };
+
+  const variance = radii.reduce((s, r) => s + (r - avgRadius) ** 2, 0) / radii.length;
+  const cv = Math.sqrt(variance) / avgRadius; // coefficient of variation
+  const radiusScore = clamp01(1 - cv / 0.35);
+
+  const angles = points.map((p) => Math.atan2(p[1] - cy, p[0] - cx));
+  let totalAngle = 0;
+  let netAngle = 0;
+  for (let i = 1; i < angles.length; i++) {
+    let d = angles[i] - angles[i - 1];
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    totalAngle += Math.abs(d);
+    netAngle += d;
+  }
+  const angleScore = clamp01(totalAngle / (2 * Math.PI));
+  const directionScore = totalAngle > 0 ? clamp01(Math.abs(netAngle) / totalAngle) : 0;
+
+  const closureDist = Math.hypot(
+    points[points.length - 1][0] - points[0][0],
+    points[points.length - 1][1] - points[0][1]
+  );
+  const closureScore = clamp01(1 - closureDist / (avgRadius * 0.6));
+
+  const combined =
+    0.35 * radiusScore +
+    0.30 * angleScore +
+    0.20 * directionScore +
+    0.15 * closureScore;
+
+  return { percent: combined * 100, avgRadius };
+}
+
+function clamp01(v) {
+  return Math.max(0, Math.min(1, v));
+}
+
+function drawTarget(cx, cy, minDim) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.9)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 10, cy);
+  ctx.lineTo(cx + 10, cy);
+  ctx.moveTo(cx, cy - 10);
+  ctx.lineTo(cx, cy + 10);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+  ctx.fillStyle = "#fff";
+  ctx.fill();
+
+  // faint ideal-radius guide
+  ctx.setLineDash([6, 6]);
+  ctx.strokeStyle = "rgba(80,80,200,0.6)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, minDim * 0.26, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawLivePercent(percent, cx, cy, minDim) {
+  const color = percent >= PASS_THRESHOLD ? "rgb(34,197,94)"
+              : percent >= 60 ? "rgb(234,179,8)"
+              : "rgb(239,68,68)";
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "bold 46px -apple-system, sans-serif";
+  ctx.fillStyle = color;
+  ctx.fillText(`${Math.round(percent)}%`, cx, cy - minDim * 0.26 - 34);
+  ctx.restore();
+}
+
+function renderLoop() {
+  if (video.readyState >= 2 && faceLandmarker && target) {
+    const result = faceLandmarker.detectForVideo(video, performance.now());
+    const minDim = Math.min(canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+
+    drawTarget(target.x, target.y, minDim);
+
+    const faceFound = result.faceLandmarks && result.faceLandmarks.length > 0;
+    dotFace.classList.toggle("on", faceFound);
+    dotFace.classList.toggle("off", !faceFound);
+    labelFace.textContent = faceFound ? "Face tracked" : "No face";
+
+    if (faceFound) {
+      const lm = result.faceLandmarks[0][NOSE_TIP_IDX];
+      const rawX = (1 - lm.x) * canvas.width; // mirrored to match the flipped draw
+      const rawY = lm.y * canvas.height;
+
+      smoothed = smoothed
+        ? [SMOOTHING * rawX + (1 - SMOOTHING) * smoothed[0],
+           SMOOTHING * rawY + (1 - SMOOTHING) * smoothed[1]]
+        : [rawX, rawY];
+
+      const [nx, ny] = smoothed;
+
+      if (phase === "DRAWING") {
+        trail.push([nx, ny]);
+        if (trail.length > TRAIL_MAX) trail.shift();
+      }
+
+      for (let i = 1; i < trail.length; i++) {
+        const alpha = i / trail.length;
+        ctx.strokeStyle = `rgba(0, ${Math.round(255 * alpha)}, ${Math.round(100 * alpha)}, 1)`;
+        ctx.lineWidth = Math.max(1, alpha * 6);
+        ctx.beginPath();
+        ctx.moveTo(trail[i - 1][0], trail[i - 1][1]);
+        ctx.lineTo(trail[i][0], trail[i][1]);
+        ctx.stroke();
+      }
+
+      ctx.beginPath();
+      ctx.arc(nx, ny, 8, 0, Math.PI * 2);
+      ctx.fillStyle = "rgb(0,220,255)";
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "#fff";
+      ctx.stroke();
+
+      if (phase === "DRAWING") {
+        const scoreResult = scoreCircle(trail, target.x, target.y, minDim);
+        const percent = scoreResult ? scoreResult.percent : 0;
+        updateScoreUI(percent);
+        drawLivePercent(percent, target.x, target.y, minDim);
+
+        if (percent >= PASS_THRESHOLD) {
+          holdFrames += 1;
+          if (holdFrames >= HOLD_FRAMES_REQUIRED) {
+            phase = "SUCCESS";
+            flashGreen();
+            // Notify parent React kiosk that the challenge is complete
+            window.parent.postMessage({ type: 'NOSE_DRAW_SUCCESS' }, '*');
+            setTimeout(resetAttempt, CLEAR_PAUSE_MS);
+          }
+        } else {
+          holdFrames = 0;
+        }
+      }
+    } else {
+      holdFrames = 0;
+    }
+
+    ctx.font = "22px -apple-system, sans-serif";
+    ctx.fillStyle = "#fff";
+    if (phase === "DRAWING") {
+      ctx.fillText("Circle the target point with your nose (90%+ to pass)", 20, 40);
+    } else {
+      ctx.fillStyle = "rgb(34,197,94)";
+      ctx.font = "bold 30px -apple-system, sans-serif";
+      ctx.fillText("🎯 CIRCLE PERFECTED!", 20, 50);
+    }
+  }
+  rafId = requestAnimationFrame(renderLoop);
+}
+
+startBtn.addEventListener("click", startCamera);
+stopBtn.addEventListener("click", stopCamera);
+resetBtn.addEventListener("click", resetAttempt);
+window.addEventListener("keydown", (e) => {
+  if (e.key === "r" || e.key === "R") resetAttempt();
+});
+</script>
+</body>
+</html>

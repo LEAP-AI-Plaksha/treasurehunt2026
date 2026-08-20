@@ -216,7 +216,7 @@ create table public.event_settings (
   -- when false, submit_answer() rejects everything: use to freeze scoring
   scoring_open        boolean not null default true,
   -- when false, teams may play their path in any order (useful for a soft start)
-  enforce_path_order  boolean not null default true,
+  enforce_path_order  boolean not null default false,
   updated_at          timestamptz not null default now()
 );
 

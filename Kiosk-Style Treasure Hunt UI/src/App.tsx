@@ -132,7 +132,7 @@ function IdleScreen({ label, terminalId, onAuthenticate }: { label: string; term
     <div className="fixed inset-0 flex flex-col items-center justify-center z-10 animate-flicker">
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] text-center">
         <div className="font-mono text-[10px] tracking-[0.4em] text-[#337DFF] mb-6 opacity-70">
-          AI@PLAKSHA - TREASURE HUNT 2024
+          AI@PLAKSHA - TREASURE HUNT 2026
         </div>
         <h1 className="text-7xl font-black tracking-[-0.02em] text-white mb-1">
           TREASURE
@@ -327,10 +327,7 @@ function BriefingScreen({ config, teamId, onStart }: { config: RoomConfigData; t
         </div>
 
         <div className="flex items-center justify-between">
-          <div>
-            <div className="font-mono text-[9px] text-[#669EFF] opacity-50 tracking-widest">INTEL VALUE</div>
-            <div className="font-digital text-2xl text-[#337DFF]">{config.points} PTS</div>
-          </div>
+          <div />
           <button
             onClick={onStart}
             className="border border-[#337DFF] px-8 py-3 font-mono text-xs font-bold text-white tracking-[0.3em] hover:bg-[#337DFF] transition-all duration-200 active:scale-95"
@@ -425,7 +422,7 @@ function ResolutionScreen({
 
         <div className="border border-[#00FF88]/40 bg-[#00FF88]/05 p-8">
           <div className="font-mono text-[9px] text-[#00FF88] tracking-[0.3em] mb-4 opacity-70">
-            INTEL RETRIEVED - {points} POINTS AWARDED - OPERATIVE: {teamId}
+            CHALLENGE CLEARED - OPERATIVE: {teamId}
           </div>
           <div className="w-full h-px bg-[#00FF88]/20 mb-4" />
           <div className="font-mono text-[9px] text-[#00FF88] tracking-[0.3em] mb-2 opacity-60">CLASSIFIED CLUE</div>
@@ -514,6 +511,12 @@ function YogaRoomChallenge({ roomId, timerSeconds, onSuccess, onManualSubmit }: 
     // onLoad only fires once the first frame actually arrives.
     setStreamUrl(url)
 
+    // In Chrome/Edge, <img> onLoad does not fire on multipart/x-mixed-replace MJPEG streams.
+    // Transition to streaming state after a brief buffer so the loading card doesn't block the video.
+    setTimeout(() => {
+      setPhase(p => (p === 'loading' ? 'streaming' : p))
+    }, 1500)
+
     intervalRef.current = setInterval(async () => {
       const stateRes = await gameApi.getGameState(roomId)
       if (stateRes.success && stateRes.completed) {
@@ -554,13 +557,13 @@ function YogaRoomChallenge({ roomId, timerSeconds, onSuccess, onManualSubmit }: 
         </div>
       )}
 
-      {(phase === 'loading' || phase === 'streaming') && streamUrl && (
+      {streamUrl && (
         <img
           src={streamUrl}
           alt="Live pose tracking feed"
           onLoad={() => setPhase('streaming')}
           onError={() => { setError('Camera module failed to start. Type your answer below instead.'); setPhase('error') }}
-          className="border border-[#00FF88]/40 max-w-full max-h-[60vh]"
+          className={`border border-[#00FF88]/40 max-w-full max-h-[60vh] ${phase === 'loading' ? 'hidden' : 'block'}`}
         />
       )}
 
@@ -601,50 +604,118 @@ function CTLCLabChallenge({ config, onSuccess, onFail }: { config: RoomConfigDat
 // Challenge: Music Room (Turing Test)
 // ---------------------------------------------------------------------------
 
+// All intercepts are AI-generated. A team needs to correctly classify ≥4/6 to pass.
 const AUDIO_FILES = [
-  'ElevenLabs_2026-08-17T18_59_11_Arvi – Desi Conversational Voice_pvc_s50_m2.mp3',
-  'ElevenLabs_2026-08-17T19_02_05_Monika Sogam – Bored, Flat & Uninterested_pvc_sp84_s11_sb92_m2.mp3',
-  'ElevenLabs_2026-08-18T14_46_46_Yatin – Serious Punjabi Friend_pvc_s50_m2.mp3',
+  'ElevenLabs_2026-08-17T18_59_11_Arvi - Desi Conversational Voice_pvc_s50_m2.mp3',
+  'ElevenLabs_2026-08-17T19_02_05_Monika Sogam - Bored, Flat & Uninterested_pvc_sp84_s11_sb92_m2.mp3',
+  'ElevenLabs_2026-08-18T14_46_46_Yatin - Serious Punjabi Friend_pvc_s50_m2.mp3',
   'ElevenLabs_2026-08-18T14_51_17_Sanchit K - Scared & Immersive_pvc_s50_m2.mp3',
   'ElevenLabs_2026-08-18T14_52_59_Parveen - Indian Male_pvc_s50_m2.mp3',
-  'ElevenLabs_2026-08-18T14_55_18_Nikita - Encouraging, Clear and Serious_pvc_sp83_s73_sb75_m2.mp3'
+  'ElevenLabs_2026-08-18T14_55_18_Nikita - Encouraging, Clear and Serious_pvc_sp83_s73_sb75_m2.mp3',
 ]
+const CORRECT_ANSWER: 'AI' = 'AI' // All audios are AI-generated
+const PASS_THRESHOLD = 4 // Need to correctly classify at least 4 out of 6
 
 function MusicRoomChallenge({ onSuccess, onFail }: { onSuccess: (submission: string) => void; onFail: () => void }) {
+  const [currentIdx, setCurrentIdx] = useState(0)
+  const [classifications, setClassifications] = useState<Array<'HUMAN' | 'AI'>>([])
   const [choice, setChoice] = useState<'HUMAN' | 'AI' | null>(null)
-  const [submitted, setSubmitted] = useState(false)
-  const [audioSrc, setAudioSrc] = useState('')
+  const [phase, setPhase] = useState<'listening' | 'result' | 'done'>('listening')
+  const [lastCorrect, setLastCorrect] = useState<boolean | null>(null)
+  const total = AUDIO_FILES.length
 
-  useEffect(() => {
-    const randomAudio = AUDIO_FILES[Math.floor(Math.random() * AUDIO_FILES.length)]
-    setAudioSrc(`/audio/${encodeURIComponent(randomAudio)}`)
-  }, [])
-
-  // Pass the selected choice to the parent for server-side validation
-  const handleSubmit = () => {
+  const handleClassify = () => {
     if (!choice) return
-    setSubmitted(true)
-    onSuccess(choice)
+    const correct = choice === CORRECT_ANSWER
+    const newClassifications = [...classifications, choice]
+    setClassifications(newClassifications)
+    setLastCorrect(correct)
+    setPhase('result')
+
+    setTimeout(() => {
+      if (currentIdx + 1 >= total) {
+        // All done — tally score
+        const correctCount = newClassifications.filter(c => c === CORRECT_ANSWER).length
+        if (correctCount >= PASS_THRESHOLD) {
+          onSuccess(`CLASSIFIED_${correctCount}_OF_${total}`)
+        } else {
+          onFail()
+        }
+      } else {
+        setCurrentIdx(i => i + 1)
+        setChoice(null)
+        setLastCorrect(null)
+        setPhase('listening')
+      }
+    }, 1800)
   }
+
+  const audioSrc = `/audio/${encodeURIComponent(AUDIO_FILES[currentIdx])}`
 
   return (
     <div className="flex h-full gap-6 max-w-3xl mx-auto py-4">
       {/* Audio pane */}
       <div className="flex-1 border border-[#337DFF]/30 bg-[#0a0f1e] flex flex-col">
-        <div className="border-b border-[#337DFF]/20 px-4 py-3 flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-[#00FF88] animate-pulse" />
-          <div className="font-mono text-[9px] text-[#669EFF] tracking-widest">GUARD FREQUENCY 7.4 MHz - LIVE</div>
-        </div>
-        
-        <div className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
-          <div className="font-mono text-sm text-[#337DFF]/70 tracking-widest mb-4">
-            PLAYING INTERCEPTED AUDIO
+        <div className="border-b border-[#337DFF]/20 px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-2 h-2 rounded-full bg-[#00FF88] animate-pulse" />
+            <div className="font-mono text-[9px] text-[#669EFF] tracking-widest">GUARD FREQUENCY 7.4 MHz - LIVE</div>
           </div>
-          {audioSrc && (
-            <audio controls src={audioSrc} className="w-full grayscale invert opacity-80" />
+          <div className="font-mono text-[9px] text-[#337DFF] tracking-widest opacity-70">
+            INTERCEPT {currentIdx + 1} / {total}
+          </div>
+        </div>
+
+        {/* Progress dots */}
+        <div className="flex gap-2 px-4 pt-3">
+          {AUDIO_FILES.map((_, i) => (
+            <div
+              key={i}
+              className="flex-1 h-1 rounded-full transition-all"
+              style={{
+                background: i < currentIdx
+                  ? (classifications[i] === CORRECT_ANSWER ? '#00FF88' : '#FF3333')
+                  : i === currentIdx ? '#337DFF' : '#337DFF22'
+              }}
+            />
+          ))}
+        </div>
+
+        <div className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
+          {phase === 'result' && lastCorrect !== null ? (
+            <div
+              className="text-center py-6 px-10 border animate-pulse"
+              style={{
+                borderColor: lastCorrect ? '#00FF88' : '#FF3333',
+                background: lastCorrect ? 'rgba(0,255,136,0.05)' : 'rgba(255,51,51,0.05)',
+              }}
+            >
+              <div
+                className="font-digital text-4xl mb-2"
+                style={{ color: lastCorrect ? '#00FF88' : '#FF3333' }}
+              >
+                {lastCorrect ? 'CORRECT' : 'INCORRECT'}
+              </div>
+              <div className="font-mono text-xs tracking-widest" style={{ color: lastCorrect ? '#00FF88' : '#FF3333' }}>
+                {lastCorrect ? 'AI DECOY IDENTIFIED' : 'MISCLASSIFIED - SIGNAL IS AI'}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="font-mono text-sm text-[#337DFF]/70 tracking-widest">
+                INTERCEPTED TRANSMISSION #{currentIdx + 1}
+              </div>
+              <audio
+                key={audioSrc}
+                controls
+                autoPlay
+                src={audioSrc}
+                className="w-full grayscale invert opacity-80"
+              />
+            </>
           )}
         </div>
-        
+
         {/* Waveform */}
         <div className="border-t border-[#337DFF]/20 px-4 py-3 flex items-center justify-center gap-1">
           {Array.from({ length: 60 }).map((_, i) => (
@@ -661,37 +732,46 @@ function MusicRoomChallenge({ onSuccess, onFail }: { onSuccess: (submission: str
       </div>
 
       {/* Classification pane */}
-      <div className="w-52 border border-[#337DFF]/30 bg-[#0a0f1e] flex flex-col p-6 gap-6">
+      <div className="w-56 border border-[#337DFF]/30 bg-[#0a0f1e] flex flex-col p-6 gap-6">
         <div>
-          <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.3em] opacity-70 mb-4">CLASSIFY ENTITY</div>
-          <div className="space-y-3">
-            {(['HUMAN', 'AI'] as const).map(opt => (
-              <button
-                key={opt}
-                onClick={() => !submitted && setChoice(opt)}
-                className="w-full border py-3 font-mono text-xs font-bold tracking-widest transition-all duration-200"
-                style={{
-                  borderColor: choice === opt ? (opt === 'HUMAN' ? '#00FF88' : '#FF3333') : '#337DFF44',
-                  color: choice === opt ? (opt === 'HUMAN' ? '#00FF88' : '#FF3333') : '#aabddd',
-                  background: choice === opt ? (opt === 'HUMAN' ? 'rgba(0,255,136,0.08)' : 'rgba(255,51,51,0.08)') : 'transparent',
-                }}
-              >
-                {opt === 'HUMAN' ? '◉ HUMAN' : '⊗ AI DECOY'}
-              </button>
-            ))}
+          <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.3em] opacity-70 mb-1">CLASSIFY ENTITY</div>
+          <div className="font-mono text-[9px] text-[#669EFF]/50 tracking-widest mb-4">
+            NEED {PASS_THRESHOLD}/{total} CORRECT
           </div>
+          {phase === 'listening' ? (
+            <div className="space-y-3">
+              {(['HUMAN', 'AI'] as const).map(opt => (
+                <button
+                  key={opt}
+                  onClick={() => setChoice(opt)}
+                  className="w-full border py-3 font-mono text-xs font-bold tracking-widest transition-all duration-200"
+                  style={{
+                    borderColor: choice === opt ? (opt === 'HUMAN' ? '#00FF88' : '#FF3333') : '#337DFF44',
+                    color: choice === opt ? (opt === 'HUMAN' ? '#00FF88' : '#FF3333') : '#aabddd',
+                    background: choice === opt ? (opt === 'HUMAN' ? 'rgba(0,255,136,0.08)' : 'rgba(255,51,51,0.08)') : 'transparent',
+                  }}
+                >
+                  {opt === 'HUMAN' ? '◉ HUMAN' : '⊗ AI DECOY'}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="font-mono text-[9px] text-[#669EFF]/50 tracking-widest text-center py-4">
+              {currentIdx + 1 < total ? 'LOADING NEXT...' : 'TALLYING RESULTS...'}
+            </div>
+          )}
         </div>
 
         <div className="mt-auto">
           <button
-            onClick={handleSubmit}
-            disabled={!choice || submitted}
+            onClick={handleClassify}
+            disabled={!choice || phase !== 'listening'}
             className="w-full bg-[#337DFF] py-3 font-mono text-xs font-bold text-white tracking-widest hover:bg-[#4488ff] disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-95"
           >
             CLASSIFY
           </button>
           <div className="font-mono text-[8px] text-[#337DFF]/30 tracking-widest text-center mt-3">
-            ONE CLASSIFICATION<br />IRREVERSIBLE
+            LISTEN THEN CLASSIFY<br />CANNOT GO BACK
           </div>
         </div>
       </div>
@@ -901,66 +981,50 @@ function ClassroomChallenge({ onSuccess }: { onSuccess: (submission: string) => 
 // ---------------------------------------------------------------------------
 
 function NoseDrawChallenge({ onSuccess, onFail }: { onSuccess: () => void; onFail: () => void }) {
-  const [confirmed, setConfirmed] = useState(false)
-  const [sketchCode, setSketchCode] = useState('')
+  const [phase, setPhase] = useState<'ready' | 'drawing' | 'done'>('ready')
 
-  const handleValidate = () => {
-    if (confirmed && sketchCode.trim().length >= 3) onSuccess()
-    else onFail()
-  }
+  useEffect(() => {
+    if (phase !== 'drawing') return
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'NOSE_DRAW_SUCCESS') onSuccess()
+    }
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [phase, onSuccess])
 
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-6 max-w-lg mx-auto text-center">
-      <div>
+    <div className="flex flex-col items-center h-full w-full gap-4">
+      <div className="text-center flex-shrink-0">
         <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.4em] opacity-70 mb-2">BIOMETRIC SKETCH VALIDATION</div>
-        <h3 className="text-xl font-bold text-white tracking-widest">NOSE-DRAW SUBMISSION PORTAL</h3>
+        <h3 className="text-xl font-bold text-white tracking-widest">NOSE-DRAW CHALLENGE</h3>
       </div>
 
-      <div className="w-full border border-[#337DFF]/30 bg-[#0a0f1e] p-6">
-        <div className="w-32 h-32 border-2 border-dashed border-[#337DFF]/30 rounded mx-auto mb-4 flex items-center justify-center">
-          <div className="text-4xl opacity-30">👃</div>
-        </div>
-        <div className="font-mono text-xs text-[#aabddd] leading-relaxed">
-          Present your physical nose-drawn sketch to the game master for validation scan.
-        </div>
-      </div>
-
-      <div className="w-full space-y-4">
-        <div>
-          <label className="font-mono text-[9px] text-[#669EFF] tracking-[0.3em] block mb-2 text-left opacity-70">
-            SKETCH VALIDATION CODE (from game master)
-          </label>
-          <input
-            type="text"
-            value={sketchCode}
-            onChange={e => setSketchCode(e.target.value)}
-            placeholder="ENTER CODE"
-            className="w-full bg-[#0a0f1e] border border-[#337DFF]/40 px-4 py-3 font-mono text-sm text-white tracking-widest placeholder:text-[#337DFF]/25 focus:outline-none focus:border-[#337DFF] transition-colors text-center"
-          />
-        </div>
-        <label className="flex items-center gap-3 cursor-pointer">
-          <div
-            onClick={() => setConfirmed(p => !p)}
-            className="w-5 h-5 border flex items-center justify-center flex-shrink-0 transition-all"
-            style={{
-              borderColor: confirmed ? '#00FF88' : '#337DFF44',
-              background: confirmed ? 'rgba(0,255,136,0.12)' : 'transparent',
-            }}
-          >
-            {confirmed && <span className="text-[#00FF88] text-xs">✓</span>}
+      {phase === 'ready' && (
+        <div className="flex flex-col items-center gap-6">
+          <div className="border border-[#337DFF]/30 bg-[#0a0f1e] p-6 max-w-sm text-center">
+            <div className="text-5xl mb-4 opacity-60">👃</div>
+            <div className="font-mono text-xs text-[#aabddd] leading-relaxed">
+              Use your nose to draw <span className="text-[#337DFF] font-bold">CAT EARS</span> in the air.
+              Follow the blue guide on screen.
+            </div>
           </div>
-          <span className="font-mono text-xs text-[#aabddd] text-left">
-            I confirm my physical sketch matches the target profile
-          </span>
-        </label>
-        <button
-          onClick={handleValidate}
-          disabled={!confirmed || sketchCode.trim().length < 3}
-          className="w-full bg-[#337DFF] py-3 font-mono text-xs font-bold text-white tracking-[0.3em] hover:bg-[#4488ff] disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-95"
-        >
-          VALIDATE SKETCH
-        </button>
-      </div>
+          <button
+            onClick={() => setPhase('drawing')}
+            className="border-2 border-[#337DFF] px-16 py-6 font-mono font-bold text-sm tracking-[0.3em] text-white hover:bg-[#337DFF]/10 transition-all active:scale-95"
+          >
+            LAUNCH NOSE CAMERA MODULE
+          </button>
+        </div>
+      )}
+
+      {phase === 'drawing' && (
+        <iframe
+          src="/nose_draw.html"
+          className="flex-1 w-full max-w-5xl mx-auto border border-[#337DFF]/30"
+          allow="camera"
+          title="Nose Draw Challenge"
+        />
+      )}
     </div>
   )
 }

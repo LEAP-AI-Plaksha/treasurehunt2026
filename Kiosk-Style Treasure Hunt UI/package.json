@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "dev:hub": "cross-env VITE_ROOM_ID=HUB VITE_PORT=5172 vite --host 0.0.0.0",
     "dev:yoga": "cross-env VITE_ROOM_ID=YOGA_ROOM      VITE_PORT=5173 vite --host 0.0.0.0",
-    "dev:ctlc": "cross-env VITE_ROOM_ID=CTLC_LAB       VITE_PORT=5174 vite --host 0.0.0.0",
+    "dev:sign": "cross-env VITE_ROOM_ID=CTLC_LAB       VITE_PORT=5174 vite --host 0.0.0.0",
     "dev:music": "cross-env VITE_ROOM_ID=MUSIC_ROOM     VITE_PORT=5175 vite --host 0.0.0.0",
     "dev:h2": "cross-env VITE_ROOM_ID=H2_LOUNGE      VITE_PORT=5176 vite --host 0.0.0.0",
     "dev:classroom": "cross-env VITE_ROOM_ID=CLASSROOM_1101 VITE_PORT=5177 vite --host 0.0.0.0",

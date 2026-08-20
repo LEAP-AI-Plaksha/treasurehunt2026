@@ -19,6 +19,9 @@ from functools import wraps
 import jwt
 import requests as http_requests
 from flask import jsonify, request
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -82,7 +85,7 @@ def team_code_from_token(token: str) -> str:
     try:
         signing_key = _jwks_client_for_project().get_signing_key_from_jwt(token)
         claims = jwt.decode(
-            token, signing_key.key, algorithms=["ES256"], audience="authenticated"
+            token, signing_key.key, algorithms=["ES256"], audience="authenticated", leeway=120
         )
     except jwt.PyJWKClientError as exc:
         jwks_error = exc
@@ -91,7 +94,7 @@ def team_code_from_token(token: str) -> str:
         if not SUPABASE_JWT_SECRET:
             raise jwt.InvalidTokenError(f"Could not verify token via JWKS: {jwks_error}")
         claims = jwt.decode(
-            token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated"
+            token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated", leeway=120
         )
 
     email = claims.get("email") or ""

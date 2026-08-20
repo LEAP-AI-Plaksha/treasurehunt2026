@@ -948,6 +948,19 @@ def _report_pose_result(token, room_id, passed, detail):
         print(f"[WARN] Could not report pose result: {exc}")
 
 
+_GLOBAL_POSE_MODEL = None
+_GLOBAL_POSE_SEQUENCE = None
+
+def get_cached_pose_model_and_sequence():
+    global _GLOBAL_POSE_MODEL, _GLOBAL_POSE_SEQUENCE
+    if _GLOBAL_POSE_MODEL is None:
+        print("[INFO] (stream) Loading YOLOv8-Pose model into memory...")
+        model_path = os.path.join(BASE_DIR, "yolov8n-pose.pt")
+        _GLOBAL_POSE_MODEL = YOLO(model_path)
+        _GLOBAL_POSE_SEQUENCE = build_pose_sequence(_GLOBAL_POSE_MODEL)
+    return _GLOBAL_POSE_MODEL, _GLOBAL_POSE_SEQUENCE
+
+
 def stream_game_frames(token, room_id):
     """Generator of MJPEG frame chunks for one crew's pose sequence.
 
@@ -955,10 +968,7 @@ def stream_game_frames(token, room_id):
     changes are the output sink (yield a JPEG instead of cv2.imshow) and the
     absence of keyboard/mouse control (auto-start, no skip/restart).
     """
-    print("[INFO] (stream) Loading YOLOv8-Pose model...")
-    model_path = os.path.join(BASE_DIR, "yolov8n-pose.pt")
-    model = YOLO(model_path)
-    poses = build_pose_sequence(model)
+    model, poses = get_cached_pose_model_and_sequence()
 
     import sys as _sys
     backend = cv2.CAP_DSHOW if _sys.platform.startswith('win') else cv2.CAP_ANY

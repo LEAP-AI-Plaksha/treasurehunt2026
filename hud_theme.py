@@ -1,18 +1,3 @@
-"""Cyberpunk-terminal HUD theme for the pose game.
-
-The camera overlay is drawn straight onto video frames with OpenCV, which only
-offers a handful of built-in Hershey fonts and no letter-spacing - nothing
-close to the kiosk's actual look (JetBrains Mono, tracked-out uppercase
-labels, thin blue bordered panels with corner accents, exact brand colors).
-
-This module renders every HUD element through Pillow instead, using the same
-JetBrains Mono files the browser loads and the kiosk's exact Tailwind hex
-palette, so the camera feed reads as part of the same application rather than
-a different one bolted on. `Canvas` does the BGR<->RGB round trip ONCE per
-frame - not once per element - so a HUD with a dozen panels costs one
-conversion, not a dozen.
-"""
-
 import os
 
 import cv2
