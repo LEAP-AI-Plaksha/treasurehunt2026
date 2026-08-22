@@ -23,7 +23,12 @@ export default defineConfig(({ mode }) => {
   const roomId        = env.VITE_ROOM_ID || 'YOGA_ROOM'
   const defaultPort   = ROOM_DEFAULT_PORTS[roomId] ?? 5173
   const devPort       = parseInt(env.VITE_PORT || String(defaultPort), 10)
-  const apiBackend    = env.VITE_API_BASE_URL || 'http://localhost:5000'
+  // Flask ML service, proxied as /api. The default must match the port app.py
+  // actually listens on (4000): on macOS the AirPlay Receiver owns 5000, which
+  // is why the service moved off it. A wrong default here fails as a 502 on
+  // every ML call from a fresh clone that never set VITE_API_BASE_URL - only
+  // the two Flask rooms notice, and only once a crew is standing at them.
+  const apiBackend    = env.VITE_API_BASE_URL || 'http://localhost:4000'
   const emitSourcemaps = mode === 'development'
 
   return {

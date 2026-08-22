@@ -244,6 +244,10 @@ const SMOOTHING = 0.4;
 const PASS_THRESHOLD = 75;        // percent
 const HOLD_FRAMES_REQUIRED = 6;   // consecutive passing frames needed before it counts
 const CLEAR_PAUSE_MS = 1800;
+// Submitted to Supabase as this room's answer when the circle is accepted. It
+// must equal NOSE_DRAW's riddle answer in supabase/seed.sql, or a cleared room
+// records as a failed attempt. Same arrangement as MUSIC_ROOM's 'ai'.
+const PASS_TOKEN = 'nose';
 
 let faceLandmarker = null;
 let stream = null;
@@ -516,8 +520,20 @@ function renderLoop() {
           if (holdFrames >= HOLD_FRAMES_REQUIRED) {
             phase = "SUCCESS";
             flashGreen();
-            // Notify parent React kiosk that the challenge is complete
-            window.parent.postMessage({ type: 'NOSE_DRAW_SUCCESS' }, '*');
+            // Notify the parent kiosk that the challenge is complete, and hand
+            // back the token it should submit. The kiosk cannot read riddle
+            // answers (RLS keeps them server-side), so a room judged in the
+            // browser has to name what it judged - exactly the contract the ASL
+            // page uses. Previously this posted no token at all and the kiosk
+            // submitted an empty string, which normalises to NULL and can never
+            // match any answer: a crew that drew a perfect circle was recorded
+            // as a failed attempt. Keep PASS_TOKEN equal to NOSE_DRAW's riddle
+            // answer in seed.sql.
+            window.parent.postMessage({
+              type: 'NOSE_DRAW_SUCCESS',
+              phrase: PASS_TOKEN,
+              accuracy: Math.round(percent),
+            }, '*');
             setTimeout(resetAttempt, CLEAR_PAUSE_MS);
           }
         } else {

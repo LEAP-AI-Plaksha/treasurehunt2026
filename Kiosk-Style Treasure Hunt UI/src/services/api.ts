@@ -368,11 +368,22 @@ const realGameApi = {
   },
 
   /** Standings are operator-only (RLS hides other crews), so this returns the
-   *  crew's own totals rather than a field-wide leaderboard. */
-  async getScores(): Promise<{ teamId: string; totalScore: number }[]> {
+   *  crew's own totals rather than a field-wide leaderboard.
+   *
+   *  A crew's result is rooms cleared out of the rooms on their route, with
+   *  elapsed time as the tiebreaker - the same rule the leaderboard view ranks
+   *  by. Points are not part of it. */
+  async getScores(): Promise<{
+    teamId: string; roomsCleared: number; roomsTotal: number; elapsedSeconds: number | null
+  }[]> {
     const run = await this.getRun()
     if (!run.success || !run.team || !run.totals) return []
-    return [{ teamId: run.team.code, totalScore: run.totals.totalPoints }]
+    return [{
+      teamId: run.team.code,
+      roomsCleared: run.totals.roomsCompleted,
+      roomsTotal: run.path?.steps.length ?? 0,
+      elapsedSeconds: run.totals.elapsedSeconds,
+    }]
   },
 
   // -------------------------------------------------------------------------
@@ -382,6 +393,23 @@ const realGameApi = {
 
   async launchGame(roomId: string): Promise<{ success: boolean; message?: string; error?: string }> {
     return mlPost('/game/launch', { roomId })
+  },
+
+  /**
+   * Steer the live pose stream: 'restart' begins the gauntlet again, 'skip'
+   * gives up on the pose currently on screen, 'quit' ends the module.
+   *
+   * These exist because the crew is watching an <img> in a browser tab, so the
+   * keys the game binds at its own OpenCV window (R / N / Q) never reach it.
+   * None of them scores anything - the run's outcome is reported by the game
+   * itself at the end of a sequence, and closing a room out early is what the
+   * GIVE UP button does.
+   */
+  async sendGameControl(
+    roomId: string,
+    command: 'restart' | 'skip' | 'quit',
+  ): Promise<{ success: boolean; command?: string; error?: string }> {
+    return mlPost('/game/control', { roomId, command })
   },
 
   async getMemoryImages(round: number): Promise<{
@@ -400,6 +428,17 @@ const realGameApi = {
   }> {
     return mlPost('/memory/generate', { promptLeft, promptRight })
   },
+}
+
+/** Seconds as H:MM:SS / M:SS, for the hub's end-of-run readout. */
+export function formatDuration(totalSeconds: number | null): string {
+  if (totalSeconds === null || !Number.isFinite(totalSeconds) || totalSeconds < 0) return '--:--'
+  const s = Math.floor(totalSeconds)
+  const hours = Math.floor(s / 3600)
+  const minutes = Math.floor((s % 3600) / 60)
+  const seconds = s % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`
 }
 
 // ---------------------------------------------------------------------------
@@ -440,7 +479,10 @@ async function hubLogin(teamId: string): Promise<LoginResponse> {
       hubAction: 'checked-out',
       route: steps.map((s) => s.roomCode),
       totals: done?.totals ?? run.totals,
-      message: `Run complete. ${done?.totals?.roomsCompleted ?? 0} rooms, ${done?.totals?.totalPoints ?? 0} points.`,
+      // Completion and time, which is what decides standings: rooms cleared out
+      // of the rooms on this crew's route, and the clock from their first
+      // authentication at the hub to this check-out. No points.
+      message: `Run complete. ${done?.totals?.roomsCompleted ?? 0} of ${steps.length} rooms cleared in ${formatDuration((done?.totals ?? run.totals)?.elapsedSeconds ?? null)}.`,
     }
   }
 

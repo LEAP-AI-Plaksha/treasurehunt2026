@@ -864,35 +864,26 @@ def run_game():
             tint = (0, 200, 0) if won else (0, 0, 200)
             cv2.addWeighted(np.full_like(frame, tint), 0.25, frame, 0.75, 0, frame)
             
-            # Webhook on win
-            if won and not hasattr(run_game, 'webhook_sent'):
-                run_game.webhook_sent = True
-                import sys, requests
+            # Report the outcome once per sequence, win or lose - the same rule
+            # the streamed kiosk path uses, so a run judged here and a run judged
+            # in the browser are recorded identically. Only when launched with a
+            # crew token (`python louvre_laser_game.py <token> <roomId>`); a bare
+            # standalone run has nothing to report to.
+            if not hasattr(run_game, 'webhook_sent'):
+                import sys
                 if len(sys.argv) >= 3:
-                    token = sys.argv[1]
-                    room_id = sys.argv[2]
-                    try:
-                        # Reports pass/fail only. The ML service forwards this to
-                        # Supabase, which stamps the completion time, so the run is
-                        # timed by the same clock as every other room.
-                        requests.post(
-                            "http://127.0.0.1:5000/api/ml/report",
-                            headers={"Authorization": f"Bearer {token}"},
-                            json={
-                                "roomId": room_id,
-                                "passed": True,
-                                "detail": {
-                                    "posesCleared": sum(1 for r in results if r),
-                                    "posesRequired": REQUIRED_POSES,
-                                    "holdSeconds": POSE_HOLD_DURATION,
-                                },
-                            },
-                            timeout=10,
-                        )
-                    except: pass
-                # Auto-close after 3 seconds of winning
-                if now - phase_start > 3.0:
-                    break
+                    run_game.webhook_sent = True
+                    _report_pose_result(sys.argv[1], sys.argv[2], won, {
+                        "posesCleared": sum(1 for r in results if r),
+                        "posesRequired": REQUIRED_POSES,
+                        "holdSeconds": POSE_HOLD_DURATION,
+                    })
+
+            # Auto-close after 3 seconds of winning. A loss holds the scorecard
+            # up until the player presses SPACE to replay, R to restart or Q to
+            # quit - this is the native window, where those keys do work.
+            if won and now - phase_start > 3.0:
+                break
         hud_pose = pose_on_screen()
         frame = draw_hud(frame, state, hud_pose, score if hud_pose is active_pose else None,
                           motion, max(timer_remaining, 0.0), hold_remaining, grace_left, results, poses,
@@ -924,10 +915,50 @@ def run_game():
 #   - Starts immediately in COUNTDOWN. There is no IDLE/click-to-start state -
 #     the kiosk's own "launch" click is what causes the browser to open this
 #     stream in the first place.
-#   - No key-driven skip/restart/quit. The sequence runs start to finish or
-#     until the viewer disconnects, at which point the generator is torn down
-#     and the camera is released in the `finally` block.
+#   - There is no cv2.waitKey() to read, because the crew is looking at a browser
+#     tab and not at a native window: the keys run_game() binds (R restart,
+#     N skip, Q quit) cannot reach this process at all. The kiosk page sends
+#     those same three actions over HTTP instead - see request_stream_command()
+#     below and /api/game/control in backend/app.py.
 # =============================================================================
+
+# Kiosk control channel ------------------------------------------------------
+# The browser cannot deliver keystrokes to OpenCV, so the kiosk POSTs a command
+# and the streaming loop picks it up on its next frame. Keyed by room, not by
+# crew: one laptop serves one room and one crew at a time (see run.md), so the
+# room is the session, and a stale command from a previous crew cannot be
+# delivered to the next one because the key is overwritten, not queued.
+STREAM_COMMANDS = ("restart", "skip", "quit")
+
+_PENDING_STREAM_COMMAND: dict = {}
+
+
+def request_stream_command(room_id, command):
+    """Queue one control command for the live stream in `room_id`.
+
+    Last write wins - the loop consumes at most one command per frame, so
+    queueing commands would only let a mistimed double-tap stack up.
+    """
+    if command not in STREAM_COMMANDS:
+        raise ValueError(f"Unknown command: {command!r}")
+    _PENDING_STREAM_COMMAND[room_id] = command
+
+
+def _take_stream_command(room_id):
+    """Pop the pending command for this room, if any."""
+    return _PENDING_STREAM_COMMAND.pop(room_id, None)
+
+
+def _ml_report_url():
+    """Loopback URL of this project's own ML service.
+
+    Reads PORT the same way backend/app.py does. It must not be hardcoded: the
+    service listens on 4000 because macOS gives 5000 to the AirPlay Receiver,
+    and a wrong port here fails silently - the pose result is simply never
+    recorded, so a crew clears the room and Supabase never hears about it.
+    """
+    return f"http://127.0.0.1:{os.getenv('PORT', '4000')}/api/ml/report"
+
 
 def _report_pose_result(token, room_id, passed, detail):
     """Tell the Flask backend how the sequence went, exactly as run_game() does.
@@ -935,15 +966,21 @@ def _report_pose_result(token, room_id, passed, detail):
     A plain loopback POST back into the same Flask process - safe only because
     the server is run with threaded=True, so this request does not block the
     stream's own still-open response.
+
+    Reports failures as well as wins. Supabase counts the attempt either way and
+    closes the room out on the last one, which is what lets a crew that cannot
+    clear the gauntlet still move on to their next room.
     """
     import requests
     try:
-        requests.post(
-            "http://127.0.0.1:5000/api/ml/report",
+        response = requests.post(
+            _ml_report_url(),
             headers={"Authorization": f"Bearer {token}"},
             json={"roomId": room_id, "passed": passed, "detail": detail},
             timeout=10,
         )
+        if response.status_code >= 400:
+            print(f"[WARN] ML report rejected ({response.status_code}): {response.text[:200]}")
     except Exception as exc:
         print(f"[WARN] Could not report pose result: {exc}")
 
@@ -965,8 +1002,9 @@ def stream_game_frames(token, room_id):
     """Generator of MJPEG frame chunks for one crew's pose sequence.
 
     Mirrors run_game()'s state machine and drawing calls one-for-one; the only
-    changes are the output sink (yield a JPEG instead of cv2.imshow) and the
-    absence of keyboard/mouse control (auto-start, no skip/restart).
+    changes are the output sink (yield a JPEG instead of cv2.imshow) and where
+    control comes from - the kiosk POSTs restart/skip/quit instead of the crew
+    pressing R/N/Q at a native window they are not looking at.
     """
     model, poses = get_cached_pose_model_and_sequence()
 
@@ -1002,11 +1040,44 @@ def stream_game_frames(token, room_id):
         else:
             state, phase_start = "COUNTDOWN", time.time()
 
+    def begin_session():
+        """Start the gauntlet over from pose 1 - the streamed equivalent of R.
+
+        webhook_sent resets too, so a replay is reported in its own right. That
+        is deliberate: one full sequence is one attempt, and Supabase counts
+        them. Restarting part-way through costs nothing, because nothing is
+        reported until SUMMARY.
+        """
+        nonlocal state, phase_start, pose_idx, results, held_time, hold_started
+        nonlocal break_start, prev_keypoints, start_game_time, webhook_sent
+        state, phase_start = "COUNTDOWN", time.time()
+        pose_idx = 0
+        results = []
+        held_time, hold_started, break_start = 0.0, False, None
+        prev_keypoints = None
+        start_game_time = time.time()
+        webhook_sent = False
+
+    # Drain any command left over from a previous stream on this room, so a
+    # stale "quit" cannot kill the run the crew is only just starting.
+    _take_stream_command(room_id)
+
     try:
         while cap.isOpened():
             success, frame = cap.read()
             if not success:
                 break
+
+            # The kiosk's stand-in for cv2.waitKey(): same three actions run_game()
+            # binds to keys, arriving over HTTP instead. Handled before anything
+            # else on the frame so a quit or restart takes effect immediately.
+            command = _take_stream_command(room_id)
+            if command == "quit":
+                break
+            if command == "restart":
+                begin_session()
+            elif command == "skip" and state in ("COUNTDOWN", "TRACKING"):
+                finish_pose(False)
 
             frame = cv2.flip(frame, 1)
             now = time.time()
@@ -1077,15 +1148,24 @@ def stream_game_frames(token, room_id):
                 tint = (0, 200, 0) if won else (0, 0, 200)
                 cv2.addWeighted(np.full_like(frame, tint), 0.25, frame, 0.75, 0, frame)
 
-                if won and not webhook_sent:
+                # Reported win or lose. Clearing REQUIRED_POSES of the ten is the
+                # pass mark - individual poses are allowed to fail - and a run
+                # that misses it is a spent attempt, not a non-event: Supabase
+                # burns the attempt and closes the room out on the last one, so
+                # the crew is released to their next room either way. Only ever
+                # sent once per sequence; begin_session() clears the latch.
+                if not webhook_sent:
                     webhook_sent = True
-                    _report_pose_result(token, room_id, True, {
+                    _report_pose_result(token, room_id, won, {
                         "posesCleared": sum(1 for r in results if r),
                         "posesRequired": REQUIRED_POSES,
                         "holdSeconds": POSE_HOLD_DURATION,
                     })
 
-                if now - phase_start > 3.0:
+                # A win closes itself out; a loss stays on the scorecard so the
+                # crew can read it and decide to retry with whatever attempts
+                # they have left. Either way the kiosk drives what happens next.
+                if won and now - phase_start > 3.0:
                     break
 
             hud_pose = pose_on_screen()
