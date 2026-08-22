@@ -597,7 +597,7 @@ function YogaRoomChallenge({
   onResolvedFail: () => void
   onAttemptsChanged: (remaining: number) => void
 }) {
-  const [phase, setPhase] = useState<'ready' | 'loading' | 'streaming' | 'spent' | 'error'>('ready')
+  const [phase, setPhase] = useState<'ready' | 'loading' | 'streaming' | 'checking' | 'spent' | 'error'>('ready')
   const [streamUrl, setStreamUrl] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [attemptsLeft, setAttemptsLeft] = useState<number | null>(null)
@@ -765,6 +765,13 @@ function YogaRoomChallenge({
         </button>
       )}
 
+      {phase === 'checking' && (
+        <div className="border border-[#00FF88]/40 bg-[#00FF88]/05 px-10 py-8 text-center animate-pulse">
+          <div className="font-mono text-[9px] text-[#00FF88] tracking-[0.3em] mb-2 opacity-70">SEQUENCE COMPLETE</div>
+          <p className="font-mono text-sm text-white tracking-wide">CONFIRMING RESULT WITH CONTROL...</p>
+        </div>
+      )}
+
       {phase === 'spent' && (
         <div className="flex flex-col items-center gap-5">
           <div className="border border-[#FF3333]/50 bg-[#FF3333]/5 px-10 py-6 text-center">
@@ -801,7 +808,26 @@ function YogaRoomChallenge({
           src={streamUrl}
           alt="Live pose tracking feed"
           onLoad={() => setPhase('streaming')}
-          onError={() => { setError('Camera module failed to start. Alert the game master.'); setPhase('error') }}
+          // A finished sequence ends the MJPEG response, and the browser reports
+          // that normal close as an <img> "error". Winning is therefore
+          // indistinguishable here from the camera failing, so this used to
+          // announce "camera module failed" at the exact moment a crew passed.
+          // Only a stream that never produced a frame is a real failure; once we
+          // are streaming, an end means the run is over, so ask the server what
+          // happened instead of guessing.
+          onError={() => {
+            if (phase === 'loading') {
+              setError('Camera module failed to start. Alert the game master.')
+              setPhase('error')
+            } else {
+              // The run finished. Drop the dead stream and tell the crew we are
+              // confirming, rather than leaving a broken image on screen while
+              // the poller catches up.
+              setStreamUrl(null)
+              setPhase('checking')
+              void poll()
+            }
+          }}
           className={`border border-[#00FF88]/40 max-w-full max-h-[55vh] ${phase === 'loading' ? 'hidden' : 'block'}`}
         />
       )}
