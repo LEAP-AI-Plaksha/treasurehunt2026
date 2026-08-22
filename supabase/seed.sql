@@ -20,7 +20,7 @@ update public.event_settings
 -- Rooms :: the hub, the 5 ROTATING game rooms, and the FINAL room.
 --
 -- ordinal 0..4 is what the path generator permutes; keep these stable or the
--- 10 seeded paths change meaning.
+-- 21 seeded paths change meaning.
 --
 -- CLASSROOM_1101 - the MLP backtrack - is kind='final' with no ordinal: it is
 -- deliberately outside the paths so that it is the same last stop for every
@@ -157,18 +157,29 @@ values
   ('TEAM7',  'Team 7',  'LVR-T07-9046'),
   ('TEAM8',  'Team 8',  'LVR-T08-3391'),
   ('TEAM9',  'Team 9',  'LVR-T09-6127'),
-  ('TEAM10', 'Team 10', 'LVR-T10-4680')
+  ('TEAM10', 'Team 10', 'LVR-T10-4680'),
+  ('TEAM11', 'Team 11', 'LVR-T11-2059'),
+  ('TEAM12', 'Team 12', 'LVR-T12-7731'),
+  ('TEAM13', 'Team 13', 'LVR-T13-4406'),
+  ('TEAM14', 'Team 14', 'LVR-T14-9188'),
+  ('TEAM15', 'Team 15', 'LVR-T15-3572'),
+  ('TEAM16', 'Team 16', 'LVR-T16-6640'),
+  ('TEAM17', 'Team 17', 'LVR-T17-1295'),
+  ('TEAM18', 'Team 18', 'LVR-T18-8817'),
+  ('TEAM19', 'Team 19', 'LVR-T19-5063'),
+  ('TEAM20', 'Team 20', 'LVR-T20-2984'),
+  ('TEAM21', 'Team 21', 'LVR-T21-7426')
 on conflict (code) do update set
   name            = excluded.name,
   enrollment_code = excluded.enrollment_code;
 
 -- -----------------------------------------------------------------------------
--- ALPHA :: a standing admin/test crew, not one of the 10 event slots.
+-- ALPHA :: a standing admin/test crew, not one of the 21 event slots.
 --
--- Shares PATH-01 with TEAM1 rather than drawing an 11th path - there are only
--- 10 seeded paths, and doubling a route is harmless since progress is tracked
--- per team_id, not per path. Kept out of the TEAM1..10 path-assignment query
--- below by getting its path set explicitly, right here.
+-- Shares PATH-01 with TEAM1 rather than drawing a 22nd path: there are 21 paths
+-- for 21 crews, and doubling a route is harmless since progress is tracked per
+-- team_id, not per path. Kept out of the TEAM1..21 path-assignment query below
+-- by getting its path set explicitly, right here.
 -- -----------------------------------------------------------------------------
 insert into public.teams (code, name, enrollment_code)
 values ('ALPHA', 'Alpha (admin test)', 'LVR-ALPHA-TEST')
@@ -181,7 +192,7 @@ update public.teams
  where code = 'ALPHA' and path_id is null;
 
 -- -----------------------------------------------------------------------------
--- Path assignment :: deterministic, alphabetical team order onto PATH-01..10, so
+-- Path assignment :: deterministic, alphabetical team order onto PATH-01..21, so
 -- route cards can be printed before the event. Every route ends with the finale,
 -- which is appended by team_route() rather than stored. Teams added later are
 -- assigned by the enroll-team function instead.
