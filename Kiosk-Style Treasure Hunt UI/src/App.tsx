@@ -652,17 +652,24 @@ function CTLCLabChallenge({ onSuccess }: { onSuccess: (submission: string) => vo
 // Challenge: Music Room (Turing Test)
 // ---------------------------------------------------------------------------
 
-// All intercepts are AI-generated. A team needs to correctly classify ≥4/6 to pass.
-const AUDIO_FILES = [
-  'voice_1_arvi_desi_conversational.mp3',
-  'voice_2_monika_bored_flat.mp3',
-  'voice_3_yatin_serious_punjabi.mp3',
-  'voice_4_sanchit_scared_immersive.mp3',
-  'voice_5_parveen_indian_male.mp3',
-  'voice_6_nikita_encouraging_serious.mp3',
+// Intercept pool includes both human guards and AI decoy syntheses.
+interface AudioTrack {
+  file: string
+  type: 'HUMAN' | 'AI'
+}
+
+const AUDIO_TRACKS: AudioTrack[] = [
+  { file: 'Hooman 1.mp3', type: 'HUMAN' },
+  { file: 'voice_1_arvi_desi_conversational.mp3', type: 'AI' },
+  { file: 'voice_2_monika_bored_flat.mp3', type: 'AI' },
+  { file: 'hooman 2.mp3', type: 'HUMAN' },
+  { file: 'voice_3_yatin_serious_punjabi.mp3', type: 'AI' },
+  { file: 'voice_4_sanchit_scared_immersive.mp3', type: 'AI' },
+  { file: 'voice_5_parveen_indian_male.mp3', type: 'AI' },
+  { file: 'voice_6_nikita_encouraging_serious.mp3', type: 'AI' },
 ]
-const CORRECT_ANSWER: 'AI' = 'AI' // All audios are AI-generated
-const PASS_THRESHOLD = 4 // Need to correctly classify at least 4 out of 6
+
+const PASS_THRESHOLD = 5 // Need to correctly classify at least 5 out of 8
 
 function MusicRoomChallenge({ onSuccess, onFail }: { onSuccess: (submission: string) => void; onFail: () => void }) {
   const [currentIdx, setCurrentIdx] = useState(0)
@@ -670,11 +677,12 @@ function MusicRoomChallenge({ onSuccess, onFail }: { onSuccess: (submission: str
   const [choice, setChoice] = useState<'HUMAN' | 'AI' | null>(null)
   const [phase, setPhase] = useState<'listening' | 'result' | 'done'>('listening')
   const [lastCorrect, setLastCorrect] = useState<boolean | null>(null)
-  const total = AUDIO_FILES.length
+  const total = AUDIO_TRACKS.length
+  const currentTrack = AUDIO_TRACKS[currentIdx]
 
   const handleClassify = () => {
     if (!choice) return
-    const correct = choice === CORRECT_ANSWER
+    const correct = choice === currentTrack.type
     const newClassifications = [...classifications, choice]
     setClassifications(newClassifications)
     setLastCorrect(correct)
@@ -683,9 +691,12 @@ function MusicRoomChallenge({ onSuccess, onFail }: { onSuccess: (submission: str
     setTimeout(() => {
       if (currentIdx + 1 >= total) {
         // All done — tally score
-        const correctCount = newClassifications.filter(c => c === CORRECT_ANSWER).length
+        const correctCount = newClassifications.reduce(
+          (acc, c, i) => acc + (c === AUDIO_TRACKS[i].type ? 1 : 0),
+          0
+        )
         if (correctCount >= PASS_THRESHOLD) {
-          onSuccess(`CLASSIFIED_${correctCount}_OF_${total}`)
+          onSuccess('ai')
         } else {
           onFail()
         }
@@ -698,7 +709,7 @@ function MusicRoomChallenge({ onSuccess, onFail }: { onSuccess: (submission: str
     }, 1800)
   }
 
-  const audioSrc = `/audio/${encodeURIComponent(AUDIO_FILES[currentIdx])}`
+  const audioSrc = `/audio/${encodeURIComponent(currentTrack.file)}`
 
   return (
     <div className="flex h-full gap-6 max-w-3xl mx-auto py-4">
@@ -716,13 +727,13 @@ function MusicRoomChallenge({ onSuccess, onFail }: { onSuccess: (submission: str
 
         {/* Progress dots */}
         <div className="flex gap-2 px-4 pt-3">
-          {AUDIO_FILES.map((_, i) => (
+          {AUDIO_TRACKS.map((track, i) => (
             <div
               key={i}
               className="flex-1 h-1 rounded-full transition-all"
               style={{
                 background: i < currentIdx
-                  ? (classifications[i] === CORRECT_ANSWER ? '#00FF88' : '#FF3333')
+                  ? (classifications[i] === AUDIO_TRACKS[i].type ? '#00FF88' : '#FF3333')
                   : i === currentIdx ? '#337DFF' : '#337DFF22'
               }}
             />
@@ -745,7 +756,9 @@ function MusicRoomChallenge({ onSuccess, onFail }: { onSuccess: (submission: str
                 {lastCorrect ? 'CORRECT' : 'INCORRECT'}
               </div>
               <div className="font-mono text-xs tracking-widest" style={{ color: lastCorrect ? '#00FF88' : '#FF3333' }}>
-                {lastCorrect ? 'AI DECOY IDENTIFIED' : 'MISCLASSIFIED - SIGNAL IS AI'}
+                {lastCorrect
+                  ? (currentTrack.type === 'AI' ? 'AI DECOY IDENTIFIED' : 'HUMAN OPERATOR IDENTIFIED')
+                  : (currentTrack.type === 'AI' ? 'MISCLASSIFIED - SIGNAL WAS AI' : 'MISCLASSIFIED - SIGNAL WAS HUMAN')}
               </div>
             </div>
           ) : (
