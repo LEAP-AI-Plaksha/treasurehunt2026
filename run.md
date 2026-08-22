@@ -37,7 +37,7 @@ the webcam.
 
 | Room | `VITE_ROOM_ID` | Port | Flask? | Webcam? | Internet? |
 |---|---|---|---|---|---|
-| OPERATIONS BASE | `HUB` | 5172 | – | – | yes |
+| OPERATIONS BASE | `HUB` | 5172 | – | – | yes (briefing board — no crew login) |
 | LASER GRID | `YOGA_ROOM` | 5173 | **yes, full** | **yes** | yes |
 | SILENT RELAY | `CTLC_LAB` | 5174 | – | yes (in browser) | yes |
 | VOICE INTERCEPT | `MUSIC_ROOM` | 5175 | – | – | yes |
@@ -78,12 +78,45 @@ supabase db push
 supabase db execute --file supabase/seed.sql
 ```
 
+### If a hosted project is behind on migrations
+
+Worth checking before an event, because the failure is total rather than
+partial: the kiosk has no hub login, so a database still carrying the old
+`check_in_room()` refuses **every** crew at **every** room with *"Check in at the
+hub terminal first"*.
+
+Two quick checks against the project, both read-only:
+
+```bash
+# Should list finish_run_when_route_resolved. If it does not, 20260822000100 is missing.
+curl -s "$SUPABASE_URL/rest/v1/" -H "apikey: $SUPABASE_ANON_KEY" \
+  | grep -o 'finish_run_when_route_resolved'
+
+# Should be 22.
+curl -s "$SUPABASE_URL/rest/v1/paths?select=code" -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" | tr ',' '\n' | grep -c PATH-
+```
+
+To fix it, `supabase db push` if you can link the project. If you cannot — the
+project lives in someone else's Supabase account, say — open the dashboard SQL
+editor and paste the migrations it is missing, **in filename order**, from
+`supabase/migrations/`. They are written to be idempotent, so re-running one that
+is already applied is harmless.
+
+One caution if crews have already started: apply only the schema migrations. Do
+not re-run `seed.sql`, and do not reassign paths — moving a crew's route mid-run
+changes which rooms they are due at.
+
 ### Create the crew logins
 
 The roster is **21 teams** (`TEAM1`–`TEAM21`), plus `ALPHA` as a standing
-admin/test crew outside the 21 event slots. With only 10 seeded routes, some
-paths carry two crews — harmless, since progress is tracked per team, not per
-path.
+admin/test crew alongside the 21 event slots. There are **22 routes for 22
+crews**, so no two crews share one: `TEAM1`–`TEAM21` take `PATH-01`–`PATH-21`
+and `ALPHA` takes `PATH-22`.
+
+22 crews over 5 rotating rooms does not divide evenly, so the spread cannot be
+perfectly flat — every room takes 4 or 5 crews at every step, which is the best
+possible. Check it any time with `select * from public.path_balance;`.
 
 Run once, from any laptop, before the event:
 
@@ -124,7 +157,8 @@ VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 VITE_SUPABASE_ANON_KEY=<anon key from Settings → API>
 VITE_TEAM_EMAIL_DOMAIN=louvre.local
 
-# Only matters on the two Flask laptops; harmless elsewhere
+# Only matters on the two Flask laptops; harmless elsewhere.
+# Both already default to these values, so you can leave them out entirely.
 VITE_ML_BASE_URL=/api
 VITE_API_BASE_URL=http://localhost:4000
 ```
@@ -151,13 +185,22 @@ fullscreen kiosk mode.
 
 ### The hub laptop only
 
-Add the operator key so the hub can read standings and reset passcodes:
+**The hub does not sign anyone in.** Crews are handed their team code, passcode
+and first riddle by hand at the operations base, so `npm run dev:hub` serves a
+briefing board with no team-code prompt on it. It needs no keys beyond the anon
+key every terminal has.
 
-```ini
-VITE_OPERATOR_KEY=<the operator secret>
-```
+That means the run's clock is bracketed by the rooms, not the hub:
 
-**Never put this on a room kiosk.** It can read every crew's times.
+| | when it is stamped |
+|---|---|
+| `started_at` | the crew's **first room** sign-in (`check_in_room`) |
+| `finished_at` | when the **last room on their route resolves**, cleared or failed |
+
+Standings and per-room times are read with the operator CLI (`node
+scripts/operator.mjs leaderboard`), which carries `OPERATOR_KEY` in its own
+environment. Nothing in the frontend reads standings any more, so
+`VITE_OPERATOR_KEY` is no longer needed on any terminal — including the hub.
 
 ---
 
@@ -259,8 +302,8 @@ entirely, so this cannot be left on by accident in a build. Delete
 
 ## Part 4 — Check it before the crews arrive
 
-The operator CLI can drive every crew through their entire route, hub to hub.
-This is the real end-to-end test:
+The operator CLI can drive every crew through their entire route, first room to
+last. This is the real end-to-end test:
 
 ```bash
 export SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
@@ -309,11 +352,11 @@ logins resolve to the wrong team or to nothing, and the failure is silent:
 
 Leave it at `louvre.local` everywhere and it cannot drift.
 
-**"BACKEND OFFLINE — start the backend server at localhost:5000" is lying to
-you.** That message (and the port it names) is stale copy — it appears whenever
-the kiosk cannot reach *Supabase*, which is the far more likely cause. Check
-your `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` and your wifi before you
-go looking for Flask.
+**"TERMINAL OFFLINE — cannot reach the event backend" means Supabase, not
+Flask.** It appears whenever the kiosk cannot read its room config, and only two
+of the seven terminals run Flask at all. Check `VITE_SUPABASE_URL`,
+`VITE_SUPABASE_ANON_KEY` and the wifi before going looking for Python. (This
+screen used to name `localhost:5000` and send people after the wrong service.)
 
 **Every room has a GIVE UP button** in the top-right of the active-challenge
 header (a two-tap confirm, so a stray touch can't end a run). It always
@@ -348,6 +391,15 @@ sound. The original ElevenLabs filenames are kept in `heist_audio_files/`.
 **The riddles in `seed.sql` are placeholders.** Write the real ones before the
 event, or every room ships with dummy text.
 
+**The pose game is driven from the kiosk page, not the keyboard shortcuts in
+the game.** It streams into the browser as an MJPEG image, so there is no OpenCV
+window to receive key presses. The kiosk shows **RESTART**, **SKIP POSE** and
+**END MODULE** buttons, and binds the same actions to `SPACE`/`R`, `N` and `Q`
+in the page. Clearing 7 of the 10 poses passes the room; a run that misses it is
+a spent attempt, and after three the room closes out and the crew moves on —
+either way the outcome is recorded, so a crew is never stuck watching a dead
+feed.
+
 **Camera permission is per-origin and per-browser.** Approve it once on each
 camera laptop during setup — do not let a crew meet the permission dialog for
 the first time mid-run.
@@ -358,7 +410,7 @@ the first time mid-run.
 
 | Laptop | One-time | Every boot |
 |---|---|---|
-| HUB | `npm install`, `.env.local` + operator key | `npm run dev:hub` |
+| HUB | `npm install`, `.env.local` | `npm run dev:hub` (briefing board, no login) |
 | YOGA_ROOM | `npm install`, `pip install -r backend/requirements.txt`, both env files | `python backend/app.py` **and** `npm run dev:yoga` |
 | CTLC_LAB | `npm install`, `.env.local` | `npm run dev:sign` |
 | MUSIC_ROOM | `npm install`, `.env.local` | `npm run dev:music` |

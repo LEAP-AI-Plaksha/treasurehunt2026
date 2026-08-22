@@ -7,13 +7,16 @@ routes, and a per-room record of who finished what and how long it took.
 HUB  ->  5 rotating rooms, in the crew's own order  ->  MLP BACKTRACK  ->  HUB
 ```
 
-Crews check in at the **hub** (origin) and are handed one of ten routes through
-the five rotating rooms. After clearing those they all converge on the same last
-stop — **CLASSROOM_1101 / NEURAL BYPASS**, the MLP backtrack — then return to the
-hub to check out.
+Crews are briefed at the **hub** (origin) — team code, passcode and first riddle
+handed over by hand, with no sign-in there — and each of the 22 crews holds its
+own route through the five rotating rooms. After clearing those they all converge
+on the same last stop — **CLASSROOM_1101 / NEURAL BYPASS**, the MLP backtrack.
 
-The clock for a room starts the moment the crew types its credentials at that
-room's terminal and stops when the room is cleared.
+Two clocks, both stamped server-side. A **room's** clock starts when the crew
+types its credentials at that room's terminal and stops when the room resolves.
+The **run's** clock starts at the crew's first room and stops when the last room
+on their route resolves, cleared or failed; it is the tiebreaker in the
+standings.
 
 ---
 
@@ -47,7 +50,7 @@ nothing else:
 
 ---
 
-## The ten routes
+## The 22 routes
 
 Only the **five rotating rooms** are permuted. The finale sits outside the paths
 entirely, so every crew ends on it.
@@ -58,14 +61,26 @@ Built from two cyclic Latin squares of order 5 over the rotating ordinals:
 - **Square B**, stride 2: path `i`, step `j` → `(i + 2j) mod 5`, for `i = 0..4`
 
 Both are Latin squares because 1 and 2 are each coprime to 5, so every column of
-each square contains all five rooms exactly once. Five rows from A plus five from
-B gives ten paths, and since each square contributes each room once per column,
-**every room is the destination of exactly 2 of the 10 paths at every step**.
+each square contains all five rooms exactly once. 5 is prime, so strides 3 and 4
+work the same way and give **squares C and D** — twenty paths in all, each square
+contributing every room exactly once per column, so **every room is the
+destination of exactly 4 of those 20 paths at every step**. No two squares share
+a row (that would need stride *a* ≡ stride *b* mod 5), so all twenty orderings
+are distinct.
 
-Ten crews over five rooms divides evenly, so this spread is perfectly flat — no
-room is ever busier than another. The two squares share no row (a row of A equals
-a row of B only if stride 1 ≡ stride 2 mod 5, which is false), so all ten
-orderings are distinct.
+The roster is 22 crews, though — 21 event teams plus `ALPHA` — and one route each
+means two more paths that no stride produces:
+
+- **`PATH-21`** = `0 1 2 4 3`
+- **`PATH-22`** = `1 0 3 2 4`
+
+Neither has constant successive differences, so neither duplicates one of the
+twenty. They are also **discordant with each other** — a different room at every
+single step — which is what keeps any one cell from being incremented twice.
+
+22 crews over 5 rooms cannot divide evenly, so no set of 22 paths is perfectly
+flat. This one is as close as it gets: **every room takes 4 or 5 crews at every
+step**, three rooms on 4 and two on 5.
 
 Check it any time:
 
@@ -113,7 +128,7 @@ supabase db push
 Locally this project uses the `544xx` port range so it can run beside another
 Supabase project on the defaults.
 
-Then load the rooms, placeholder riddles, ten routes and ten crews:
+Then load the rooms, placeholder riddles, 22 routes and 22 crews:
 
 ```bash
 supabase db execute --file supabase/seed.sql
@@ -241,20 +256,21 @@ marked `locked_out`, scores zero, and they move on to their next step.
 
 ---
 
-## Riddles reveal progressively, starting at the hub
+## Riddles reveal progressively
 
 A crew is handed one riddle at a time, never the whole route's puzzles at once:
 
-- **`hub_check_in()`** returns the prompt for the crew's **first** room
-  (`nextRiddle`), so they know what they're walking into before they've moved.
-- **`check_in_room()`** returns the current room's own prompt again on arrival,
-  so nothing depends on anyone remembering what the hub showed them.
+- The **first** riddle is handed out on paper at the operations base. The hub
+  terminal does not sign anyone in, so nothing digital reveals it.
+- **`check_in_room()`** returns the current room's own prompt on arrival, so
+  nothing depends on anyone remembering what they were given.
 - **`submit_answer()`, `record_ml_result()`, `abandon_room()`** all return the
   **next** unresolved room's prompt (`nextRiddle`) the instant the current one
   is resolved - pass or fail. A crew that fails a room learns their next
   assignment just as fast as one that solves it.
-- Once every room is resolved, `nextRiddle` comes back `null`: time to return
-  to the hub.
+- Once every room is resolved, `nextRiddle` comes back `null`, and the run is
+  already finished server-side (see below) — nothing more is required of the
+  crew than walking back.
 
 Only ever ONE room's prompt is exposed at a time - never the whole route, and
 never an answer. The underlying read is `next_riddle_preview(team_id)`, a
@@ -265,15 +281,24 @@ read-only function so calling it never starts a clock.
 ## Flow control: what stops a crew jumping ahead
 
 Three independent rules, all enforced in Postgres, so they hold no matter which
-of the ten devices a crew walks up to.
+of the seven devices a crew walks up to.
 
-**1. The run must start at the origin.** `check_in_room()` refuses every room
-until the crew has checked in at the hub, so `started_at` is always set before
-any room opens.
+**1. The clock starts at the first room.** `check_in_room()` stamps
+`started_at` when it is still null, so a crew's run begins the moment they
+authenticate anywhere on their route. It used to refuse every room until
+`hub_check_in()` had stamped it, which made the hub a mandatory gate; the hub no
+longer signs anyone in, so that gate would strand every crew.
+
+The other end is symmetrical: a trigger on `room_visits`
+(`finish_run_when_route_resolved`) stamps `finished_at` once every room on the
+crew's route is resolved, cleared or failed. It is a trigger rather than a call
+inside each RPC because four functions can resolve a visit — `submit_answer`,
+`record_ml_result`, `abandon_room` — and `admin_force_complete` bypasses all of
+them.
 
 ```
-> enter CTLC_LAB before the hub
-"Check in at the hub terminal first"
+> first room sign-in, no hub visit
+started_at stamped -> the run's clock is running
 ```
 
 **2. Rooms open strictly in the crew's own order.** Only the next unresolved step
@@ -459,10 +484,9 @@ Crew-facing (`authenticated`):
 
 | RPC | Purpose |
 |---|---|
-| `hub_check_in()` | Leave the origin; stamps `started_at`, returns the route |
-| `check_in_room(code)` | Credentials entered at a room; stamps `arrived_at`, returns the riddle. Idempotent |
-| `submit_answer(code, text)` | Grade an answer; on success stamps `completed_at` and awards points |
-| `hub_check_out()` | Return to the origin; stamps `finished_at` |
+| `check_in_room(code)` | Credentials entered at a room; stamps `arrived_at`, and `started_at` on the crew's first room; returns the riddle. Idempotent |
+| `submit_answer(code, text)` | Grade an answer; on success stamps `completed_at` |
+| `hub_check_in()` / `hub_check_out()` | Legacy hub bracketing. Nothing calls these — the clock now starts at the first room and ends on a trigger. Kept so an organiser can still bracket a run by hand |
 | `abandon_room(code)` | Give up on a room: 0 points, time recorded, next room opens |
 | `my_run()` | The crew's whole route with per-room status and timing |
 
@@ -484,10 +508,10 @@ clue — returns the current state instead of an "out of order" refusal.
 | View | Contents |
 |---|---|
 | `team_room_times` | The scoring export: completion and duration per crew per room, `is_final` flags the finale |
-| `leaderboard` | Ranked by points, then time in rooms, then finish time |
+| `leaderboard` | Ranked by **rooms completed**, then elapsed time (first sign-in → finish). Points play no part |
 | `room_occupancy` | Live load and average solve time per room |
 | `enrollment_status` | Who has enrolled, and their route |
-| `path_balance` | Crews arriving per room per step; rotating cells should all read 2 |
+| `path_balance` | Crews arriving per room per step; with 22 crews every cell should read 4 or 5 |
 | `skipped_rooms` | Rooms skipped or force-completed |
 | `active_sessions` | Which terminal each crew is currently signed in at |
 
