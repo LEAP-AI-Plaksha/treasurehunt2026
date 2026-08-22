@@ -360,9 +360,9 @@ function NextRoomPreview({ nextRiddle }: { nextRiddle?: NextRiddlePreview | null
 
   if (nextRiddle === null) {
     return (
-      <div className="border-2 border-[#337DFF]/50 bg-[#337DFF]/05 px-8 py-10 mb-8 text-center">
-        <div className="font-mono text-[11px] text-[#337DFF] tracking-[0.4em] mb-4 opacity-80">ROUTE CLEARED</div>
-        <p className="font-mono text-2xl md:text-3xl text-white tracking-wide leading-snug">
+      <div className="border-2 border-[#337DFF]/50 bg-[#337DFF]/05 px-6 py-8 mb-6 text-center">
+        <div className="font-mono text-[10px] text-[#337DFF] tracking-[0.4em] mb-3 opacity-80">ROUTE CLEARED</div>
+        <p className="font-mono text-[clamp(1rem,2.6vh,1.8rem)] text-white tracking-wide leading-snug">
           All rooms resolved. Return to the operations base.
         </p>
       </div>
@@ -370,23 +370,33 @@ function NextRoomPreview({ nextRiddle }: { nextRiddle?: NextRiddlePreview | null
   }
 
   return (
-    <div className="border-2 border-[#337DFF]/60 bg-[#337DFF]/08 px-8 py-10 md:px-12 md:py-12 mb-8 text-left shadow-[0_0_40px_rgba(51,125,255,0.15)]">
-      <div className="flex items-baseline justify-between gap-4 mb-6">
-        <div className="font-mono text-[11px] text-[#337DFF] tracking-[0.4em] opacity-80">
-          YOUR NEXT RIDDLE{nextRiddle.isFinal ? ' - FINAL ROOM' : ''}
-        </div>
+    <div className="border-2 border-[#337DFF]/60 bg-[#337DFF]/08 px-6 py-6 md:px-10 md:py-8 mb-6 text-left shadow-[0_0_40px_rgba(51,125,255,0.15)]">
+      <div className="font-mono text-[10px] text-[#337DFF] tracking-[0.4em] opacity-80 mb-4">
+        YOUR NEXT RIDDLE{nextRiddle.isFinal ? ' - FINAL ROOM' : ''}
       </div>
 
-      {/* The riddle itself: as large as the headline above it, and left-aligned
-          with generous leading because it is read aloud, not glanced at. */}
-      <p className="font-mono text-2xl md:text-4xl text-white leading-[1.35] tracking-wide">
+      {/* The riddle itself - the one thing on this screen a crew reads together
+          and acts on, so it is the largest text here.
+
+          whitespace-pre-line is load-bearing: the riddles are verse, around
+          eight lines, and their newlines come straight from the database. HTML
+          collapses those into one wrapped paragraph without it, which turns a
+          shaped riddle into a blob.
+
+          The size is tied to viewport HEIGHT rather than a md: breakpoint,
+          because the binding constraint is fitting eight lines on the kiosk
+          screen alongside the rest of this panel - not how wide the screen is.
+          At 2.6vh with 1.45 leading, eight lines occupy roughly 30vh: about
+          270px on a 900px laptop panel, 325px on a 1080p screen. The rem bounds
+          stop it collapsing on a very short window or ballooning on a TV. */}
+      <p className="font-mono text-[clamp(1rem,2.6vh,1.8rem)] leading-[1.45] text-white tracking-wide whitespace-pre-line">
         {nextRiddle.prompt}
       </p>
 
-      <div className="w-full h-px bg-[#337DFF]/25 my-8" />
+      <div className="w-full h-px bg-[#337DFF]/25 my-6" />
 
-      <div className="font-mono text-[11px] text-[#669EFF]/70 tracking-[0.3em] mb-2">SOLVE IT TO FIND</div>
-      <div className="font-mono text-xl md:text-2xl text-[#00FF88] font-bold tracking-[0.2em]">
+      <div className="font-mono text-[10px] text-[#669EFF]/70 tracking-[0.3em] mb-2">SOLVE IT TO FIND</div>
+      <div className="font-mono text-[clamp(0.95rem,2vh,1.4rem)] text-[#00FF88] font-bold tracking-[0.2em]">
         {nextRiddle.label}
       </div>
     </div>
@@ -418,21 +428,21 @@ function ResolutionScreen({
 }) {
   if (!success && attemptsLeft === 0) {
     return (
-      <div className="fixed inset-0 flex flex-col items-center justify-center z-10">
+      <div className="fixed inset-0 flex flex-col items-center justify-center z-10 overflow-y-auto pt-28 pb-8">
         <div className="text-center max-w-4xl w-full mx-8">
-          <div className="font-digital text-8xl text-red-500 mb-4">000</div>
+          <div className="font-digital text-[clamp(2.5rem,8vh,5rem)] leading-none text-red-500 mb-3">000</div>
           <div className="font-mono text-[9px] tracking-[0.4em] text-red-400 mb-6 opacity-70">
             {gaveUp ? 'ROOM ABANDONED' : 'TERMINAL LOCKOUT'}
           </div>
-          <h2 className="text-3xl font-black text-white mb-4 tracking-wide">
+          <h2 className="text-2xl font-black text-white mb-3 tracking-wide">
             {gaveUp ? 'OPERATION ABORTED' : 'OPERATION COMPROMISED'}
           </h2>
-          <p className="text-[#aabddd] text-sm mb-8 font-light leading-relaxed">
+          <p className="text-[#aabddd] text-sm mb-5 font-light leading-relaxed">
             {gaveUp
               ? 'Your crew withdrew from this room. The attempt is recorded as a fail - proceed to your next room.'
               : 'All authentication attempts exhausted. This terminal has been locked. Alert the game master for manual override.'}
           </p>
-          <div className="border border-red-500/30 bg-red-500/05 px-6 py-4 mb-8 font-mono text-xs text-red-400/70 tracking-widest">
+          <div className="border border-red-500/30 bg-red-500/05 px-6 py-3 mb-5 font-mono text-xs text-red-400/70 tracking-widest">
             TERMINAL {terminalId} - {gaveUp ? 'ABANDONED' : 'LOCKED'} - TEAM: {teamId}
           </div>
           <NextRoomPreview nextRiddle={nextRiddle} />
@@ -449,7 +459,7 @@ function ResolutionScreen({
 
   if (!success) {
     return (
-      <div className="fixed inset-0 flex flex-col items-center justify-center z-10">
+      <div className="fixed inset-0 flex flex-col items-center justify-center z-10 overflow-y-auto pt-28 pb-8">
         <div className="text-center max-w-4xl w-full mx-8">
           <div className="font-digital text-8xl text-amber-500 mb-4">
             {'0'.repeat(maxAttempts).split('').map((_, i) => i < attemptsLeft ? '●' : '○').join('')}
@@ -471,23 +481,27 @@ function ResolutionScreen({
   }
 
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-center z-10">
+    <div className="fixed inset-0 flex flex-col items-center justify-center z-10 overflow-y-auto pt-28 pb-8">
       <div className="max-w-4xl w-full mx-8">
-        <div className="text-center mb-8">
-          <div className="font-digital text-7xl text-[#00FF88] mb-2">ACCESS</div>
-          <div className="font-digital text-7xl text-[#00FF88]">GRANTED</div>
+        <div className="text-center mb-5">
+          {/* Sized to stay clear of the fixed KioskBadge in the top-right
+              corner: the digital face is wide, and at 7vh this ran underneath
+              the badge on a 1440x900 panel. */}
+          <div className="font-digital text-[clamp(1.75rem,5vh,3.25rem)] leading-none text-[#00FF88]">
+            ACCESS GRANTED
+          </div>
         </div>
 
-        <div className="border border-[#00FF88]/40 bg-[#00FF88]/05 p-8">
-          <div className="font-mono text-[9px] text-[#00FF88] tracking-[0.3em] mb-4 opacity-70">
+        <div className="border border-[#00FF88]/40 bg-[#00FF88]/05 px-6 py-4">
+          <div className="font-mono text-[9px] text-[#00FF88] tracking-[0.3em] mb-2 opacity-70">
             CHALLENGE CLEARED - OPERATIVE: {teamId}
           </div>
-          <div className="w-full h-px bg-[#00FF88]/20 mb-4" />
-          <div className="font-mono text-[9px] text-[#00FF88] tracking-[0.3em] mb-2 opacity-60">CLASSIFIED CLUE</div>
-          <p className="font-mono text-sm text-white leading-relaxed tracking-wide">{clue}</p>
+          {clue ? (
+            <p className="font-mono text-sm text-white leading-relaxed tracking-wide">{clue}</p>
+          ) : null}
         </div>
 
-        <div className="mt-6">
+        <div className="mt-5">
           <NextRoomPreview nextRiddle={nextRiddle} />
         </div>
 
@@ -1404,7 +1418,7 @@ function GiveUpButton({ onConfirm }: { onConfirm: () => void }) {
 // kiosk: it deliberately has no team-code prompt to mistype into.
 function HubScreen({ label, terminalId }: { label: string; terminalId: string }) {
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-center z-10">
+    <div className="fixed inset-0 flex flex-col items-center justify-center z-10 overflow-y-auto pt-28 pb-8">
       <div className="max-w-3xl w-full mx-8 text-center">
         <div className="font-mono text-[10px] text-[#337DFF] tracking-[0.4em] opacity-70 mb-3">
           {terminalId} - OPERATIONS BASE
