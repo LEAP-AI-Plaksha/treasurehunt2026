@@ -157,6 +157,9 @@ export const demoGameApi = {
   async abandonRoom() { return ok({ success: true, nextRiddle: DEMO_NEXT_RIDDLE } as never) },
   async getScores() { return ok([] as never) },
   async launchGame() { return ok({ success: false, error: 'Demo mode: no ML service.' }) },
+  // Accepted and dropped: demo mode has no pose stream to steer, and the
+  // controls must not throw on a terminal being demoed with no Flask running.
+  async sendGameControl() { return ok({ success: true }) },
 
   // Simulated 3-round Memory Forgery flow - a placeholder photo per side and
   // an always-passing score, so the room's full round loop is reachable with

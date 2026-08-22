@@ -377,7 +377,6 @@ function NextRoomPreview({ nextRiddle }: { nextRiddle?: NextRiddlePreview | null
 function ResolutionScreen({
   success,
   clue,
-  points,
   teamId,
   terminalId,
   attemptsLeft,
@@ -389,7 +388,6 @@ function ResolutionScreen({
 }: {
   success: boolean
   clue?: string
-  points?: number
   teamId: string
   terminalId: string
   attemptsLeft: number
@@ -535,14 +533,95 @@ function ManualAnswerFallback({
   )
 }
 
-function YogaRoomChallenge({ roomId, timerSeconds, onSuccess }: { roomId: string; timerSeconds: number; onSuccess: (elapsed: number) => void }) {
-  const [phase, setPhase] = useState<'ready' | 'loading' | 'streaming' | 'error'>('ready')
+// The pose gauntlet runs in Flask and arrives here as an MJPEG <img>, which has
+// two consequences this component exists to handle.
+//
+// 1. The crew never has focus on the OpenCV window - there isn't one - so the
+//    game's own R / N / Q keys are dead. The controls below post the same three
+//    actions to /api/game/control, and the keyboard handler binds R, N, Q and
+//    SPACE here in the page so the keys a player naturally reaches for work.
+//
+// 2. The stream cannot tell us how the run went; Supabase can. The game reports
+//    its own verdict (>= 7 of 10 poses held) and Supabase burns an attempt for
+//    every finished sequence, pass or fail, closing the room out on the last
+//    one. So this polls the crew's own room state and reacts to what the server
+//    says rather than trying to score anything client-side:
+//      completed          -> cleared, hand off to the success screen
+//      locked_out         -> out of attempts, hand off to the lockout screen,
+//                            which is what reveals the next room's riddle
+//      attempts went up   -> a spent attempt with some left: show the verdict
+//                            and let them run it again
+function YogaRoomChallenge({
+  roomId,
+  timerSeconds,
+  onSuccess,
+  onResolvedFail,
+  onAttemptsChanged,
+}: {
+  roomId: string
+  timerSeconds: number
+  onSuccess: (elapsed: number) => void
+  onResolvedFail: () => void
+  onAttemptsChanged: (remaining: number) => void
+}) {
+  const [phase, setPhase] = useState<'ready' | 'loading' | 'streaming' | 'spent' | 'error'>('ready')
   const [streamUrl, setStreamUrl] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [attemptsLeft, setAttemptsLeft] = useState<number | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Attempts already on the record when this terminal opened the module. The
+  // poller compares against this to spot "a sequence just finished" without
+  // needing the stream to report anything back to the browser.
+  const baselineAttempts = useRef<number | null>(null)
+  // Guards the one-shot handoffs: onSuccess/onResolvedFail must not fire twice
+  // if a poll lands while the parent is already switching screens.
+  const handedOff = useRef(false)
 
-  const handleStart = async () => {
-    if (phase !== 'ready') return
+  const stopPolling = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+  }
+
+  const poll = async () => {
+    const res = await gameApi.getGameState(roomId)
+    if (!res.success || handedOff.current) return
+
+    setAttemptsLeft(res.attemptsRemaining)
+    onAttemptsChanged(res.attemptsRemaining)
+
+    if (res.completed) {
+      handedOff.current = true
+      stopPolling()
+      onSuccess(timerSeconds)
+      return
+    }
+
+    if (res.lockout) {
+      handedOff.current = true
+      stopPolling()
+      onResolvedFail()
+      return
+    }
+
+    if (baselineAttempts.current === null) {
+      baselineAttempts.current = res.attempts
+      return
+    }
+
+    // The run ended and did not clear the gauntlet, but they still have a go
+    // left. Drop the dead stream and offer it again.
+    if (res.attempts > baselineAttempts.current) {
+      baselineAttempts.current = res.attempts
+      stopPolling()
+      setStreamUrl(null)
+      setPhase('spent')
+    }
+  }
+
+  const startStream = async () => {
+    setError('')
     setPhase('loading')
     const url = await poseStreamUrl(roomId)
     if (!url) {
@@ -554,7 +633,10 @@ function YogaRoomChallenge({ roomId, timerSeconds, onSuccess }: { roomId: string
     // the sequence - there is no separate "launch" call. Loading the model and
     // opening the webcam takes a few seconds on a cold start; the <img>'s
     // onLoad only fires once the first frame actually arrives.
-    setStreamUrl(url)
+    //
+    // The cache-buster matters on a retry: without it the browser reuses the
+    // finished response for an identical URL and the second run never opens.
+    setStreamUrl(`${url}&t=${Date.now()}`)
 
     // In Chrome/Edge, <img> onLoad does not fire on multipart/x-mixed-replace MJPEG streams.
     // Transition to streaming state after a brief buffer so the loading card doesn't block the video.
@@ -562,22 +644,79 @@ function YogaRoomChallenge({ roomId, timerSeconds, onSuccess }: { roomId: string
       setPhase(p => (p === 'loading' ? 'streaming' : p))
     }, 1500)
 
-    intervalRef.current = setInterval(async () => {
-      const stateRes = await gameApi.getGameState(roomId)
-      if (stateRes.success && stateRes.completed) {
-        clearInterval(intervalRef.current!)
-        onSuccess(timerSeconds)
-      }
-    }, 2000)
+    stopPolling()
+    intervalRef.current = setInterval(poll, 2000)
   }
 
-  useEffect(() => () => clearInterval(intervalRef.current!), [])
+  const handleStart = async () => {
+    if (phase !== 'ready') return
+    // Read the attempt count before the first sequence can change it.
+    const before = await gameApi.getGameState(roomId)
+    if (before.success) {
+      baselineAttempts.current = before.attempts
+      setAttemptsLeft(before.attemptsRemaining)
+    }
+    await startStream()
+  }
+
+  // restart re-runs the gauntlet inside the already-open stream; quit tears the
+  // module down and hands the terminal back to the crew.
+  const control = async (command: 'restart' | 'skip' | 'quit') => {
+    if (phase !== 'streaming' && phase !== 'loading') return
+    try {
+      await gameApi.sendGameControl(roomId, command)
+    } catch {
+      setError('Could not reach the camera module. Alert the game master.')
+      return
+    }
+    if (command === 'quit') {
+      stopPolling()
+      setStreamUrl(null)
+      setPhase('ready')
+    }
+  }
+
+  // The keys the game binds at its own window, bound here instead. SPACE and R
+  // both restart, matching the native window where SPACE replays and R restarts.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (phase !== 'streaming' && phase !== 'loading') return
+      const key = e.key.toLowerCase()
+      if (key === ' ' || key === 'spacebar' || key === 'r') {
+        e.preventDefault()   // SPACE would otherwise scroll the kiosk page
+        void control('restart')
+      } else if (key === 'n') {
+        e.preventDefault()
+        void control('skip')
+      } else if (key === 'q') {
+        e.preventDefault()
+        void control('quit')
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+    // Re-bound when the phase changes, so the handler's own phase guard and the
+    // control() it closes over are never a render behind.
+  }, [phase])
+
+  // Tearing down the component must also stop the camera: without the quit the
+  // generator keeps running until Flask notices the dropped socket.
+  useEffect(() => () => {
+    stopPolling()
+    void gameApi.sendGameControl(roomId, 'quit').catch(() => {})
+  }, [roomId])
+
+  const live = phase === 'streaming' || phase === 'loading'
 
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-8 select-none">
+    <div className="flex flex-col items-center justify-center h-full gap-6 select-none">
       <div className="text-center">
         <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.4em] opacity-70 mb-2">LASER DEACTIVATION SEQUENCE</div>
         <h3 className="text-xl font-bold text-white tracking-widest">PHYSICAL POSE VERIFICATION</h3>
+        <div className="font-mono text-[9px] text-[#669EFF]/60 tracking-[0.2em] mt-2">
+          HOLD 7 OF 10 POSES TO CLEAR THE GRID
+          {attemptsLeft !== null && ` - ${attemptsLeft} ATTEMPT${attemptsLeft === 1 ? '' : 'S'} REMAINING`}
+        </div>
       </div>
 
       {error && (
@@ -591,6 +730,28 @@ function YogaRoomChallenge({ roomId, timerSeconds, onSuccess }: { roomId: string
         >
           LAUNCH CAMERA MODULE
         </button>
+      )}
+
+      {phase === 'spent' && (
+        <div className="flex flex-col items-center gap-5">
+          <div className="border border-[#FF3333]/50 bg-[#FF3333]/5 px-10 py-6 text-center">
+            <div className="font-mono text-[9px] text-[#FF3333] tracking-[0.3em] mb-2">SEQUENCE FAILED</div>
+            <p className="font-mono text-sm text-white tracking-wide">
+              FEWER THAN 7 POSES HELD - ATTEMPT RECORDED
+            </p>
+            {attemptsLeft !== null && (
+              <p className="font-mono text-xs text-[#669EFF]/70 tracking-wide mt-2">
+                {attemptsLeft} ATTEMPT{attemptsLeft === 1 ? '' : 'S'} REMAINING
+              </p>
+            )}
+          </div>
+          <button
+            onClick={startStream}
+            className="border-2 px-12 py-4 font-mono font-bold text-sm tracking-[0.3em] transition-all active:scale-95 cursor-pointer border-[#337DFF] text-white hover:bg-[#337DFF]/10"
+          >
+            RUN SEQUENCE AGAIN
+          </button>
+        </div>
       )}
 
       {phase === 'loading' && (
@@ -608,8 +769,36 @@ function YogaRoomChallenge({ roomId, timerSeconds, onSuccess }: { roomId: string
           alt="Live pose tracking feed"
           onLoad={() => setPhase('streaming')}
           onError={() => { setError('Camera module failed to start. Alert the game master.'); setPhase('error') }}
-          className={`border border-[#00FF88]/40 max-w-full max-h-[60vh] ${phase === 'loading' ? 'hidden' : 'block'}`}
+          className={`border border-[#00FF88]/40 max-w-full max-h-[55vh] ${phase === 'loading' ? 'hidden' : 'block'}`}
         />
+      )}
+
+      {live && (
+        <div className="flex flex-col items-center gap-2">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => control('restart')}
+              className="border border-[#337DFF]/50 px-6 py-2 font-mono text-[11px] text-white tracking-[0.2em] hover:bg-[#337DFF]/20 active:scale-95 transition-all"
+            >
+              RESTART
+            </button>
+            <button
+              onClick={() => control('skip')}
+              className="border border-[#337DFF]/50 px-6 py-2 font-mono text-[11px] text-white tracking-[0.2em] hover:bg-[#337DFF]/20 active:scale-95 transition-all"
+            >
+              SKIP POSE
+            </button>
+            <button
+              onClick={() => control('quit')}
+              className="border border-[#FF3333]/50 px-6 py-2 font-mono text-[11px] text-[#FF6666] tracking-[0.2em] hover:bg-[#FF3333]/15 active:scale-95 transition-all"
+            >
+              END MODULE
+            </button>
+          </div>
+          <div className="font-mono text-[9px] text-[#669EFF]/45 tracking-[0.2em]">
+            SPACE / R RESTART - N SKIP POSE - Q END MODULE
+          </div>
+        </div>
       )}
     </div>
   )
@@ -848,8 +1037,9 @@ function MusicRoomChallenge({ onSuccess, onFail }: { onSuccess: (submission: str
 // /static, and the images route returns paths like /static/images/foo.jpg -
 // so those need the real backend origin, not a hardcoded guess (this used to
 // be a bare "http://localhost:5000", which 403s on macOS because that port is
-// AirPlay Receiver, not Flask - see run.md).
-const ML_ORIGIN = (import.meta.env.VITE_API_BASE_URL as string) || 'http://localhost:5000'
+// AirPlay Receiver, not Flask - see run.md). The fallback tracks the port
+// app.py listens on, so a device that never set VITE_API_BASE_URL still works.
+const ML_ORIGIN = (import.meta.env.VITE_API_BASE_URL as string) || 'http://localhost:4000'
 
 // Three memorise-and-reconstruct rounds, six fresh online photos in total
 // (two per round). Mirrors backend/app.py's MEMORY_TOTAL_ROUNDS - the crew's
@@ -1098,13 +1288,18 @@ function ClassroomChallenge({ onSuccess }: { onSuccess: (submission: string) => 
 // Challenge: Nose Draw (Sketch Portal)
 // ---------------------------------------------------------------------------
 
-function NoseDrawChallenge({ onSuccess, onFail }: { onSuccess: () => void; onFail: () => void }) {
+// Like the ASL page, the sketch page judges the attempt in the browser and hands
+// back the token it accepted, which is what gets submitted. It used to submit
+// nothing at all - an empty submission normalises to NULL server-side and
+// matches no answer, so a crew that drew the circle correctly was recorded as a
+// failed attempt and, three tries in, locked out of a room they had solved.
+function NoseDrawChallenge({ onSuccess, onFail }: { onSuccess: (submission: string) => void; onFail: () => void }) {
   const [phase, setPhase] = useState<'ready' | 'drawing' | 'done'>('ready')
 
   useEffect(() => {
     if (phase !== 'drawing') return
     const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'NOSE_DRAW_SUCCESS') onSuccess()
+      if (event.data?.type === 'NOSE_DRAW_SUCCESS') onSuccess(event.data.phrase || '')
     }
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
@@ -1188,6 +1383,7 @@ function ActiveScreen({
   onSuccess,
   onFail,
   onGiveUp,
+  onAttemptsChanged,
 }: {
   config: RoomConfigData
   roomId: RoomId
@@ -1195,6 +1391,7 @@ function ActiveScreen({
   onSuccess: (opts: { submission?: string; elapsedSeconds?: number }) => void
   onFail: () => void
   onGiveUp: () => void
+  onAttemptsChanged: (remaining: number) => void
 }) {
   return (
     <div className="fixed inset-0 flex flex-col z-10">
@@ -1222,6 +1419,12 @@ function ActiveScreen({
             roomId={roomId}
             timerSeconds={config.timerSeconds}
             onSuccess={elapsed => onSuccess({ elapsedSeconds: elapsed })}
+            // The pose game already reported the failure and Supabase already
+            // closed the room out, so this only has to surface the outcome and
+            // the next room's riddle - onFail's submit_answer call hits the
+            // locked_out branch, which returns exactly that and changes nothing.
+            onResolvedFail={onFail}
+            onAttemptsChanged={onAttemptsChanged}
           />
         )}
         {roomId === 'CTLC_LAB' && (
@@ -1249,7 +1452,7 @@ function ActiveScreen({
         )}
         {roomId === 'NOSE_DRAW' && (
           <NoseDrawChallenge
-            onSuccess={() => onSuccess({})}
+            onSuccess={submission => onSuccess({ submission })}
             onFail={onFail}
           />
         )}
@@ -1271,7 +1474,6 @@ export default function App() {
   const [attemptsLeft, setAttemptsLeft] = useState(DEFAULT_MAX_ATTEMPTS)
   const [teamId, setTeamId] = useState('')
   const [successClue, setSuccessClue] = useState('')
-  const [successPoints, setSuccessPoints] = useState(0)
   const [gaveUp, setGaveUp] = useState(false)
   const [nextRiddle, setNextRiddle] = useState<NextRiddlePreview | null>(null)
 
@@ -1292,7 +1494,6 @@ export default function App() {
     setAttemptsLeft(roomConfig?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS)
     setTeamId('')
     setSuccessClue('')
-    setSuccessPoints(0)
     setGaveUp(false)
     setNextRiddle(null)
   }
@@ -1310,7 +1511,6 @@ export default function App() {
       })
       if (res.success) {
         setSuccessClue(res.clue ?? '')
-        setSuccessPoints(res.points ?? 0)
         setNextRiddle(res.nextRiddle ?? null)
         setScreen('success')
       } else {
@@ -1368,9 +1568,15 @@ export default function App() {
     return (
       <div className="fixed inset-0 bg-[#000307] flex items-center justify-center">
         <div className="text-center">
-          <div className="font-mono text-[#FF3333] tracking-widest mb-4">BACKEND OFFLINE</div>
-          <div className="font-mono text-xs text-[#669EFF]/60">
-            Start the backend server at localhost:5000 then refresh.
+          {/* This fires when the room's config cannot be read, which is a
+              Supabase problem, not a Flask one - only two devices even run
+              Flask. The old copy named a local port and sent operators
+              hunting for the wrong service. */}
+          <div className="font-mono text-[#FF3333] tracking-widest mb-4">TERMINAL OFFLINE</div>
+          <div className="font-mono text-xs text-[#669EFF]/60 leading-relaxed">
+            Cannot reach the event backend.<br />
+            Check this device's network, then VITE_SUPABASE_URL and
+            VITE_SUPABASE_ANON_KEY in .env.local.
           </div>
           <button
             onClick={() => window.location.reload()}
@@ -1424,6 +1630,9 @@ export default function App() {
           onSuccess={handleChallengeSuccess}
           onFail={handleChallengeFail}
           onGiveUp={handleGiveUp}
+          // The machine-graded rooms burn attempts server-side, so the header's
+          // tracker has to be told rather than counting submissions itself.
+          onAttemptsChanged={setAttemptsLeft}
         />
       )}
 
@@ -1431,7 +1640,6 @@ export default function App() {
         <ResolutionScreen
           success={false}
           clue={successClue}
-          points={successPoints}
           teamId={teamId}
           terminalId={terminalId}
           attemptsLeft={attemptsLeft}
@@ -1445,7 +1653,6 @@ export default function App() {
         <ResolutionScreen
           success={true}
           clue={successClue}
-          points={successPoints}
           teamId={teamId}
           terminalId={terminalId}
           attemptsLeft={attemptsLeft}
@@ -1460,7 +1667,6 @@ export default function App() {
         <ResolutionScreen
           success={false}
           clue=""
-          points={0}
           teamId={teamId}
           terminalId={terminalId}
           attemptsLeft={0}

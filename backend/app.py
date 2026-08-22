@@ -148,6 +148,45 @@ def game_video_feed():
         mimetype="multipart/x-mixed-replace; boundary=frame",
     )
 
+
+@app.route("/api/game/control", methods=["POST"])
+@require_team_jwt
+def game_control(team_id: str):
+    """Send one control command to this room's live pose stream.
+
+    The crew is looking at a browser tab, not at the OpenCV window, so the keys
+    run_game() binds locally (R restart, N skip, Q quit) never reach the game
+    loop. The kiosk posts them here instead and the streaming loop picks the
+    command up on its next frame.
+
+    Commands only steer the run; they never decide its outcome. Quitting drops
+    the stream without reporting anything, which leaves the crew's attempts
+    untouched - closing a room out early is abandon_room()'s job (the GIVE UP
+    button), and that stays with Supabase.
+    """
+    data = request.get_json(silent=True) or {}
+    room_id = (data.get("roomId") or "").strip()
+    command = (data.get("command") or "").strip().lower()
+
+    if not room_id:
+        return jsonify({"success": False, "error": "roomId is required"}), 400
+
+    import sys as _sys
+    script_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if script_dir not in _sys.path:
+        _sys.path.insert(0, script_dir)
+    from louvre_laser_game import STREAM_COMMANDS, request_stream_command
+
+    if command not in STREAM_COMMANDS:
+        return jsonify({
+            "success": False,
+            "error": f"command must be one of: {', '.join(STREAM_COMMANDS)}",
+        }), 400
+
+    request_stream_command(room_id, command)
+    return jsonify({"success": True, "roomId": room_id, "command": command})
+
+
 # ---------------------------------------------------------------------------
 # Routes - machine-graded results
 # ---------------------------------------------------------------------------
