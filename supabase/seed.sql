@@ -174,12 +174,12 @@ on conflict (code) do update set
   enrollment_code = excluded.enrollment_code;
 
 -- -----------------------------------------------------------------------------
--- ALPHA :: a standing admin/test crew, not one of the 21 event slots.
+-- ALPHA :: a standing admin/test crew, alongside the 21 event slots.
 --
--- Shares PATH-01 with TEAM1 rather than drawing a 22nd path: there are 21 paths
--- for 21 crews, and doubling a route is harmless since progress is tracked per
--- team_id, not per path. Kept out of the TEAM1..21 path-assignment query below
--- by getting its path set explicitly, right here.
+-- Holds PATH-22, its own route. It used to double up on TEAM1's PATH-01, which
+-- scored fine (progress is per team_id) but walked the two crews through the
+-- rooms in lockstep - the congestion the paths exist to prevent. Pinned here
+-- explicitly so it stays out of the TEAM1..21 assignment query below.
 -- -----------------------------------------------------------------------------
 insert into public.teams (code, name, enrollment_code)
 values ('ALPHA', 'Alpha (admin test)', 'LVR-ALPHA-TEST')
@@ -188,33 +188,46 @@ on conflict (code) do update set
   enrollment_code = excluded.enrollment_code;
 
 update public.teams
-   set path_id = (select id from public.paths where code = 'PATH-01')
+   set path_id = (select id from public.paths where code = 'PATH-22')
  where code = 'ALPHA' and path_id is null;
 
 -- -----------------------------------------------------------------------------
--- Path assignment :: deterministic, alphabetical team order onto PATH-01..21, so
--- route cards can be printed before the event. Every route ends with the finale,
--- which is appended by team_route() rather than stored. Teams added later are
--- assigned by the enroll-team function instead.
--- Only fills blanks: a team that already holds a path keeps it.
+-- Path assignment :: one crew per path, deterministic so route cards can be
+-- printed before the event. Every route ends with the finale, which is appended
+-- by team_route() rather than stored.
+--
+-- Crews needing a path are matched against the paths NOBODY HOLDS YET, in order.
+-- Both halves of that matter:
+--
+--   - Only unassigned crews are ranked, so a crew pinned earlier in this file
+--     (ALPHA, on PATH-22) does not consume a slot and shift everyone down.
+--   - The target is the free paths rather than PATH-01, PATH-02, ... by rank.
+--     Ranking straight onto path numbers is only correct when every crew is
+--     unassigned: run the seed again after adding crews and the new batch
+--     restarts at PATH-01 and doubles up on crews that already hold it, which
+--     is what put TEAM11..TEAM20 on PATH-01..10 alongside TEAM1..TEAM10.
+--
+-- Idempotent: a crew that already holds a path keeps it, and re-running assigns
+-- nothing because no crew is left unassigned.
 -- -----------------------------------------------------------------------------
-with ranked as (
+with free_paths as (
+  select p.id,
+         row_number() over (order by p.code) as slot
+    from public.paths p
+   where not exists (
+     select 1 from public.teams t where t.path_id = p.id
+   )
+),
+ranked as (
   select t.id,
-         'PATH-' || lpad((row_number() over (
-           -- length first, so TEAM10 sorts after TEAM9 instead of after TEAM1
-           order by length(t.code), t.code
-         ))::text, 2, '0') as path_code
-    -- Only teams still needing a path are ranked. A team assigned earlier in
-    -- this file (ALPHA, pinned to PATH-01 above) must not consume a rank slot
-    -- here, or every team after it shifts down by one and the last team is
-    -- left with no path at all - which is exactly what happened before this
-    -- filter was added.
+         -- length first, so TEAM10 sorts after TEAM9 instead of after TEAM1
+         row_number() over (order by length(t.code), t.code) as slot
     from public.teams t
    where t.path_id is null
 )
 update public.teams t
-   set path_id = p.id
-  from ranked, public.paths p
- where t.id = ranked.id
-   and p.code = ranked.path_code
+   set path_id = f.id
+  from ranked r
+  join free_paths f on f.slot = r.slot
+ where t.id = r.id
    and t.path_id is null;

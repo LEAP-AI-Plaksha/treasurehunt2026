@@ -278,7 +278,9 @@ Louvre Heist operator CLI            target: ${SUPABASE_URL}
     const file = join(REPO, 'team-credentials.txt')
     const header =
       `TREASURE by LEAP - A Louvre Heist\nTeam credentials\n\n` +
-      `Crews type their TEAM CODE and PASSWORD at the hub, then at every room.\n` +
+      `Crews type their TEAM CODE and PASSWORD at every ROOM terminal. There is\n` +
+      `no sign-in at the hub - hand out the code, the passcode and the first\n` +
+      `riddle there by hand. The clock starts at their first room.\n` +
       `Route is the order of rooms for that crew; the last room is the same for everyone.\n\n`
     writeFileSync(
       file,
