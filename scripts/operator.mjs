@@ -276,8 +276,16 @@ Louvre Heist operator CLI            target: ${SUPABASE_URL}
     // Written to disk because a terminal scrollback is a bad place to keep the
     // only copy. Gitignored: this file is the one real secret in the project.
     const file = join(REPO, 'team-credentials.txt')
+    // The project URL belongs in the file. A passcode only exists on the
+    // Supabase it was written against, and an unlabelled sheet generated
+    // against a local stack looks identical to one for the hosted project -
+    // it just fails at the terminal with "Invalid team code or passcode",
+    // which sends you hunting the wrong problem.
     const header =
       `TREASURE by LEAP - A Louvre Heist\nTeam credentials\n\n` +
+      `PROJECT: ${SUPABASE_URL}\n` +
+      `These passwords exist ONLY on that project. A sheet generated against a\n` +
+      `different Supabase - a local stack, say - is rejected here.\n\n` +
       `Crews type their TEAM CODE and PASSWORD at every ROOM terminal. There is\n` +
       `no sign-in at the hub - hand out the code, the passcode and the first\n` +
       `riddle there by hand. The clock starts at their first room.\n` +
