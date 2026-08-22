@@ -881,17 +881,15 @@ interface AudioTrack {
 }
 
 const AUDIO_TRACKS: AudioTrack[] = [
-  { file: 'Hooman 1.mp3', type: 'HUMAN' },
-  { file: 'voice_1_arvi_desi_conversational.mp3', type: 'AI' },
-  { file: 'voice_2_monika_bored_flat.mp3', type: 'AI' },
-  { file: 'hooman 2.mp3', type: 'HUMAN' },
-  { file: 'voice_3_yatin_serious_punjabi.mp3', type: 'AI' },
-  { file: 'voice_4_sanchit_scared_immersive.mp3', type: 'AI' },
-  { file: 'voice_5_parveen_indian_male.mp3', type: 'AI' },
-  { file: 'voice_6_nikita_encouraging_serious.mp3', type: 'AI' },
+  { file: 'AI3.mp3', type: 'AI' },
+  { file: 'Human1.mp3', type: 'HUMAN' },
+  { file: 'AI1.mp3', type: 'AI' },
+  { file: 'AI5.mp3', type: 'AI' },
+  { file: 'AI2.mp3', type: 'AI' },
+  { file: 'AI4.mp3', type: 'AI' },
 ]
 
-const PASS_THRESHOLD = 5 // Need to correctly classify at least 5 out of 8
+const PASS_THRESHOLD = 4 // Need to correctly classify at least 4 out of 6
 
 function MusicRoomChallenge({ onSuccess, onFail }: { onSuccess: (submission: string) => void; onFail: () => void }) {
   const [currentIdx, setCurrentIdx] = useState(0)
