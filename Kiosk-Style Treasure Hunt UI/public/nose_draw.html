@@ -1,22 +1,27 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Nose Draw — Circle Challenge</title>
 <style>
+  /* Kiosk terminal palette - matches the TEAM AUTHENTICATION screen.
+     Square corners, JetBrains Mono, near-black ground, blue rules. */
   :root {
-    --bg: #0b0d10;
-    --panel: #14171c;
-    --border: #262b33;
-    --text: #e8eaed;
-    --muted: #8a93a3;
-    --accent: #4da3ff;
-    --green: #22c55e;
-    --green-glow: rgba(34, 197, 94, 0.55);
-    --amber: #eab308;
-    --amber-glow: rgba(234, 179, 8, 0.5);
-    --red: #ef4444;
+    --bg: #000307;
+    --panel: #0a0f1e;
+    --border: rgba(51, 125, 255, 0.4);
+    --text: #FFFFFF;
+    --muted: #669EFF;
+    --accent: #337DFF;
+    --green: #00FF88;
+    --green-glow: rgba(0, 255, 136, 0.55);
+    --amber: #FFAA00;
+    --amber-glow: rgba(255, 170, 0, 0.5);
+    --red: #FF3333;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -24,7 +29,7 @@
     height: 100%;
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: 'JetBrains Mono', monospace;
   }
   body {
     display: flex;
@@ -57,7 +62,7 @@
     background: var(--panel);
     border: 1px solid var(--border);
     padding: 6px 12px;
-    border-radius: 999px;
+    border-radius: 0;
     font-size: 13px;
     color: var(--muted);
   }
@@ -66,7 +71,7 @@
     width: 9px;
     height: 9px;
     border-radius: 50%;
-    background: #55606f;
+    background: rgba(51, 125, 255, 0.35);
     transition: background 120ms ease, box-shadow 120ms ease;
   }
   .dot.on {
@@ -85,7 +90,7 @@
     width: min(92vw, 900px);
     aspect-ratio: 4 / 3;
     background: #000;
-    border-radius: 16px;
+    border-radius: 0;
     overflow: hidden;
     border: 1px solid var(--border);
     box-shadow: 0 10px 40px rgba(0,0,0,0.5);
@@ -117,7 +122,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(10, 12, 15, 0.92);
+    background: rgba(0, 3, 7, 0.92);
     flex-direction: column;
     gap: 14px;
     text-align: center;
@@ -135,11 +140,11 @@
     font-weight: 600;
     font-size: 15px;
     padding: 12px 22px;
-    border-radius: 10px;
+    border-radius: 0;
     border: none;
     cursor: pointer;
     background: var(--accent);
-    color: #041018;
+    color: #000307;
     transition: transform 80ms ease, opacity 120ms ease;
   }
   button:hover { opacity: 0.9; }
@@ -158,11 +163,11 @@
     margin-top: 14px;
     max-width: 900px;
     width: min(92vw, 900px);
-    background: #2a1414;
-    border: 1px solid #5c2323;
-    color: #ffb4b4;
+    background: rgba(255, 51, 51, 0.10);
+    border: 1px solid rgba(255, 51, 51, 0.5);
+    color: #FF6666;
     padding: 12px 16px;
-    border-radius: 10px;
+    border-radius: 0;
     font-size: 13px;
     white-space: pre-wrap;
     display: none;
@@ -179,7 +184,7 @@
 <body>
 
   <h1>🎯 Nose Draw — Circle Challenge</h1>
-  <p class="subtitle">Trace a circle around the target point with your nose. You need 90%+ accuracy to pass.</p>
+  <p class="subtitle">Trace a circle around the target point with your nose. You need 75%+ accuracy to pass.</p>
 
   <div class="status-row">
     <div class="pill"><span class="dot" id="dotCamera"></span><span id="labelCamera">Camera off</span></div>
@@ -236,7 +241,7 @@ const labelScore = document.getElementById("labelScore");
 const NOSE_TIP_IDX = 1;
 const TRAIL_MAX = 200;
 const SMOOTHING = 0.4;
-const PASS_THRESHOLD = 90;        // percent
+const PASS_THRESHOLD = 75;        // percent
 const HOLD_FRAMES_REQUIRED = 6;   // consecutive passing frames needed before it counts
 const CLEAR_PAUSE_MS = 1800;
 
@@ -526,7 +531,7 @@ function renderLoop() {
     ctx.font = "22px -apple-system, sans-serif";
     ctx.fillStyle = "#fff";
     if (phase === "DRAWING") {
-      ctx.fillText("Circle the target point with your nose (90%+ to pass)", 20, 40);
+      ctx.fillText("Circle the target point with your nose (75%+ to pass)", 20, 40);
     } else {
       ctx.fillStyle = "rgb(34,197,94)";
       ctx.font = "bold 30px -apple-system, sans-serif";

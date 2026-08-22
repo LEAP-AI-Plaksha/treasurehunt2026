@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import imgBackground from '@/imports/LaserGrid/73ecf9f6066a41d6d2daab627902dcec860f5ac3.png'
-import { gameApi, poseStreamUrl, type RoomConfigData } from '@/services/api'
+import { gameApi, poseStreamUrl, type RoomConfigData, type NextRiddlePreview } from '@/services/api'
 import { CURRENT_ROOM_ID, DEFAULT_MAX_ATTEMPTS, ROOM_LABELS, type RoomId } from '@/config/gameSettings'
 
 // ---------------------------------------------------------------------------
@@ -321,10 +321,12 @@ function BriefingScreen({ config, teamId, onStart }: { config: RoomConfigData; t
           {config.briefing}
         </p>
 
-        <div className="border-l-2 border-[#337DFF] pl-4 mb-8">
-          <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.3em] mb-1">DIRECTIVE</div>
-          <p className="text-white text-sm font-mono">{config.hint}</p>
-        </div>
+        {config.hint && (
+          <div className="border-l-2 border-[#337DFF] pl-4 mb-8">
+            <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.3em] mb-1">DIRECTIVE</div>
+            <p className="text-white text-sm font-mono">{config.hint}</p>
+          </div>
+        )}
 
         <div className="flex items-center justify-between">
           <div />
@@ -344,6 +346,34 @@ function BriefingScreen({ config, teamId, onStart }: { config: RoomConfigData; t
 // Resolution screen
 // ---------------------------------------------------------------------------
 
+// Shown once a room is actually resolved (solved, locked out, or abandoned) -
+// never on a mid-run retry, since the server itself withholds nextRiddle
+// until then. `undefined` (not yet known) renders nothing; `null` means the
+// crew has cleared every room on their route.
+function NextRoomPreview({ nextRiddle }: { nextRiddle?: NextRiddlePreview | null }) {
+  if (nextRiddle === undefined) return null
+
+  if (nextRiddle === null) {
+    return (
+      <div className="border border-[#337DFF]/40 bg-[#337DFF]/05 p-6 mb-8 text-left">
+        <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.3em] mb-2 opacity-70">ROUTE CLEARED</div>
+        <p className="font-mono text-sm text-white tracking-wide">Return to the hub to check out.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="border border-[#337DFF]/40 bg-[#337DFF]/05 p-6 mb-8 text-left">
+      <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.3em] mb-2 opacity-70">
+        NEXT ROOM{nextRiddle.isFinal ? ' - FINAL' : ''}
+      </div>
+      <div className="font-mono text-sm text-white font-bold tracking-widest mb-3">{nextRiddle.label}</div>
+      <div className="w-full h-px bg-[#337DFF]/20 mb-3" />
+      <p className="font-mono text-xs text-[#aabddd] leading-relaxed">{nextRiddle.prompt}</p>
+    </div>
+  )
+}
+
 function ResolutionScreen({
   success,
   clue,
@@ -352,6 +382,8 @@ function ResolutionScreen({
   terminalId,
   attemptsLeft,
   maxAttempts,
+  gaveUp,
+  nextRiddle,
   onRetry,
   onReset,
 }: {
@@ -362,6 +394,8 @@ function ResolutionScreen({
   terminalId: string
   attemptsLeft: number
   maxAttempts: number
+  gaveUp?: boolean
+  nextRiddle?: NextRiddlePreview | null
   onRetry: () => void
   onReset: () => void
 }) {
@@ -370,19 +404,26 @@ function ResolutionScreen({
       <div className="fixed inset-0 flex flex-col items-center justify-center z-10">
         <div className="text-center max-w-xl mx-8">
           <div className="font-digital text-8xl text-red-500 mb-4">000</div>
-          <div className="font-mono text-[9px] tracking-[0.4em] text-red-400 mb-6 opacity-70">TERMINAL LOCKOUT</div>
-          <h2 className="text-3xl font-black text-white mb-4 tracking-wide">OPERATION COMPROMISED</h2>
+          <div className="font-mono text-[9px] tracking-[0.4em] text-red-400 mb-6 opacity-70">
+            {gaveUp ? 'ROOM ABANDONED' : 'TERMINAL LOCKOUT'}
+          </div>
+          <h2 className="text-3xl font-black text-white mb-4 tracking-wide">
+            {gaveUp ? 'OPERATION ABORTED' : 'OPERATION COMPROMISED'}
+          </h2>
           <p className="text-[#aabddd] text-sm mb-8 font-light leading-relaxed">
-            All authentication attempts exhausted. This terminal has been locked. Alert the game master for manual override.
+            {gaveUp
+              ? 'Your crew withdrew from this room. The attempt is recorded as a fail - proceed to your next room.'
+              : 'All authentication attempts exhausted. This terminal has been locked. Alert the game master for manual override.'}
           </p>
           <div className="border border-red-500/30 bg-red-500/05 px-6 py-4 mb-8 font-mono text-xs text-red-400/70 tracking-widest">
-            TERMINAL {terminalId} - LOCKED - TEAM: {teamId}
+            TERMINAL {terminalId} - {gaveUp ? 'ABANDONED' : 'LOCKED'} - TEAM: {teamId}
           </div>
+          <NextRoomPreview nextRiddle={nextRiddle} />
           <button
             onClick={onReset}
             className="border border-red-500/50 px-8 py-3 font-mono text-xs text-red-400 tracking-widest hover:bg-red-500/10 transition-colors"
           >
-            GAME MASTER RESET
+            {gaveUp ? 'RESET TERMINAL' : 'GAME MASTER RESET'}
           </button>
         </div>
       </div>
@@ -429,7 +470,11 @@ function ResolutionScreen({
           <p className="font-mono text-sm text-white leading-relaxed tracking-wide">{clue}</p>
         </div>
 
-        <div className="flex justify-center mt-8">
+        <div className="mt-6">
+          <NextRoomPreview nextRiddle={nextRiddle} />
+        </div>
+
+        <div className="flex justify-center mt-2">
           <button
             onClick={onReset}
             className="border border-[#337DFF]/40 px-8 py-3 font-mono text-xs text-[#337DFF]/60 tracking-widest hover:border-[#337DFF] hover:text-white transition-colors"
@@ -490,7 +535,7 @@ function ManualAnswerFallback({
   )
 }
 
-function YogaRoomChallenge({ roomId, timerSeconds, onSuccess, onManualSubmit }: { roomId: string; timerSeconds: number; onSuccess: (elapsed: number) => void; onManualSubmit: (text: string) => void }) {
+function YogaRoomChallenge({ roomId, timerSeconds, onSuccess }: { roomId: string; timerSeconds: number; onSuccess: (elapsed: number) => void }) {
   const [phase, setPhase] = useState<'ready' | 'loading' | 'streaming' | 'error'>('ready')
   const [streamUrl, setStreamUrl] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -562,12 +607,10 @@ function YogaRoomChallenge({ roomId, timerSeconds, onSuccess, onManualSubmit }: 
           src={streamUrl}
           alt="Live pose tracking feed"
           onLoad={() => setPhase('streaming')}
-          onError={() => { setError('Camera module failed to start. Type your answer below instead.'); setPhase('error') }}
+          onError={() => { setError('Camera module failed to start. Alert the game master.'); setPhase('error') }}
           className={`border border-[#00FF88]/40 max-w-full max-h-[60vh] ${phase === 'loading' ? 'hidden' : 'block'}`}
         />
       )}
-
-      <ManualAnswerFallback onSubmit={onManualSubmit} />
     </div>
   )
 }
@@ -576,11 +619,17 @@ function YogaRoomChallenge({ roomId, timerSeconds, onSuccess, onManualSubmit }: 
 // Challenge: CTLC Lab (Silent Communication)
 // ---------------------------------------------------------------------------
 
-function CTLCLabChallenge({ config, onSuccess, onFail }: { config: RoomConfigData; onSuccess: (submission: string) => void; onFail: () => void }) {
+// The ASL page owns the target phrase and only ever posts a message when the
+// crew actually signs it correctly - it hands back the exact phrase it tested
+// them on, so that (and only that) is what gets submitted as the room's
+// answer. Previously this sent a fixed "SIGN_LANGUAGE_SUCCESS" string that
+// could never match the room's real riddle answer, so finishing the ASL game
+// could never actually clear CTLC_LAB.
+function CTLCLabChallenge({ onSuccess }: { onSuccess: (submission: string) => void }) {
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data && event.data.type === 'HEIST_SUCCESS') {
-        onSuccess("SIGN_LANGUAGE_SUCCESS");
+        onSuccess(event.data.phrase || '')
       }
     };
     window.addEventListener('message', handleMessage);
@@ -595,7 +644,6 @@ function CTLCLabChallenge({ config, onSuccess, onFail }: { config: RoomConfigDat
         allow="camera"
         title="Sign Language Challenge"
       />
-      <ManualAnswerFallback onSubmit={onSuccess} />
     </div>
   )
 }
@@ -606,12 +654,12 @@ function CTLCLabChallenge({ config, onSuccess, onFail }: { config: RoomConfigDat
 
 // All intercepts are AI-generated. A team needs to correctly classify ≥4/6 to pass.
 const AUDIO_FILES = [
-  'ElevenLabs_2026-08-17T18_59_11_Arvi - Desi Conversational Voice_pvc_s50_m2.mp3',
-  'ElevenLabs_2026-08-17T19_02_05_Monika Sogam - Bored, Flat & Uninterested_pvc_sp84_s11_sb92_m2.mp3',
-  'ElevenLabs_2026-08-18T14_46_46_Yatin - Serious Punjabi Friend_pvc_s50_m2.mp3',
-  'ElevenLabs_2026-08-18T14_51_17_Sanchit K - Scared & Immersive_pvc_s50_m2.mp3',
-  'ElevenLabs_2026-08-18T14_52_59_Parveen - Indian Male_pvc_s50_m2.mp3',
-  'ElevenLabs_2026-08-18T14_55_18_Nikita - Encouraging, Clear and Serious_pvc_sp83_s73_sb75_m2.mp3',
+  'voice_1_arvi_desi_conversational.mp3',
+  'voice_2_monika_bored_flat.mp3',
+  'voice_3_yatin_serious_punjabi.mp3',
+  'voice_4_sanchit_scared_immersive.mp3',
+  'voice_5_parveen_indian_male.mp3',
+  'voice_6_nikita_encouraging_serious.mp3',
 ]
 const CORRECT_ANSWER: 'AI' = 'AI' // All audios are AI-generated
 const PASS_THRESHOLD = 4 // Need to correctly classify at least 4 out of 6
@@ -783,30 +831,49 @@ function MusicRoomChallenge({ onSuccess, onFail }: { onSuccess: (submission: str
 // Challenge: H2 Lounge (Memory + Description)
 // ---------------------------------------------------------------------------
 
-function H2LoungeChallenge({ timerSeconds, onSuccess }: { timerSeconds: number; onSuccess: (submission?: string) => void }) {
-  const [phase, setPhase] = useState<'loading' | 'viewing' | 'input' | 'generating' | 'done'>('loading')
+// The Flask ML service's own origin. Vite's dev proxy only forwards /api, not
+// /static, and the images route returns paths like /static/images/foo.jpg -
+// so those need the real backend origin, not a hardcoded guess (this used to
+// be a bare "http://localhost:5000", which 403s on macOS because that port is
+// AirPlay Receiver, not Flask - see run.md).
+const ML_ORIGIN = (import.meta.env.VITE_API_BASE_URL as string) || 'http://localhost:5000'
+
+// Three memorise-and-reconstruct rounds, six fresh online photos in total
+// (two per round). Mirrors backend/app.py's MEMORY_TOTAL_ROUNDS - the crew's
+// browser drives round advancement, but the server decides pass/fail and
+// grades every image against the original with real CLIP/SSIM scoring, not
+// this component.
+function H2LoungeChallenge({ timerSeconds, onSuccess, onFail }: { timerSeconds: number; onSuccess: (submission?: string) => void; onFail: () => void }) {
+  const [round, setRound] = useState(1)
+  const [totalRounds, setTotalRounds] = useState(3)
+  const [phase, setPhase] = useState<'loading' | 'viewing' | 'input' | 'generating' | 'roundResult' | 'final'>('loading')
   const [countdown, setCountdown] = useState(timerSeconds)
   const [images, setImages] = useState<{ left: string; right: string }>({ left: '', right: '' })
   const [prompts, setPrompts] = useState({ left: '', right: '' })
   const [generated, setGenerated] = useState<{ left: string; right: string }>({ left: '', right: '' })
+  const [roundScore, setRoundScore] = useState<number | null>(null)
+  const [roundPassed, setRoundPassed] = useState(false)
+  const [overallPassed, setOverallPassed] = useState(false)
+  const [passes, setPasses] = useState(0)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    gameApi.getMemoryImages().then(res => {
+    setPhase('loading')
+    setPrompts({ left: '', right: '' })
+    gameApi.getMemoryImages(round).then(res => {
       if (res.success && res.left && res.right) {
-        // Assume API returns absolute or relative paths
-        setImages({ left: res.left.startsWith('http') ? res.left : `http://localhost:5000${res.left}`, right: res.right.startsWith('http') ? res.right : `http://localhost:5000${res.right}` })
+        setImages({ left: res.left.startsWith('http') ? res.left : `${ML_ORIGIN}${res.left}`, right: res.right.startsWith('http') ? res.right : `${ML_ORIGIN}${res.right}` })
+        setTotalRounds(res.totalRounds ?? 3)
         setCountdown(res.displaySeconds ?? timerSeconds)
         setPhase('viewing')
       } else {
         setError(res.error || 'Failed to load images')
-        setPhase('input')
       }
-    }).catch(err => {
+    }).catch(() => {
       setError('Network error loading images')
-      setPhase('input')
     })
-  }, [timerSeconds])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round])
 
   useEffect(() => {
     if (phase !== 'viewing') return
@@ -830,10 +897,18 @@ function H2LoungeChallenge({ timerSeconds, onSuccess }: { timerSeconds: number; 
       const res = await gameApi.generateMemoryImages(prompts.left, prompts.right)
       if (res.success && res.generatedLeft && res.generatedRight) {
         setGenerated({
-          left: res.generatedLeft.startsWith('http') ? res.generatedLeft : `http://localhost:5000${res.generatedLeft}`,
-          right: res.generatedRight.startsWith('http') ? res.generatedRight : `http://localhost:5000${res.generatedRight}`
+          left: res.generatedLeft.startsWith('http') ? res.generatedLeft : `${ML_ORIGIN}${res.generatedLeft}`,
+          right: res.generatedRight.startsWith('http') ? res.generatedRight : `${ML_ORIGIN}${res.generatedRight}`
         })
-        setPhase('done')
+        setRoundScore(res.roundScore ?? null)
+        setRoundPassed(!!res.roundPassed)
+        if (res.final) {
+          setOverallPassed(!!res.overallPassed)
+          setPasses(res.passes ?? 0)
+          setPhase('final')
+        } else {
+          setPhase('roundResult')
+        }
       } else {
         setError(res.error || 'Failed to generate images')
         setPhase('input')
@@ -844,25 +919,25 @@ function H2LoungeChallenge({ timerSeconds, onSuccess }: { timerSeconds: number; 
     }
   }
 
-  const handleValidate = () => {
-    onSuccess() // Notify backend of success
+  const handleContinue = () => {
+    setRound(r => r + 1)
+  }
+
+  const handleFinish = () => {
+    if (overallPassed) onSuccess(`MEMORY_ROUNDS_${passes}_OF_${totalRounds}`)
+    else onFail()
   }
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-6 max-w-4xl mx-auto">
       <div className="text-center">
-        <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.4em] opacity-70 mb-2">TARGET ARTEFACTS - CLASSIFIED</div>
+        <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.4em] opacity-70 mb-2">
+          TARGET ARTEFACTS - CLASSIFIED - ROUND {round} OF {totalRounds}
+        </div>
         <h3 className="text-xl font-bold text-white tracking-widest">MEMORISE AND RECONSTRUCT</h3>
       </div>
 
       {error && <div className="text-[#FF3333] font-mono text-xs">{error}</div>}
-
-      {(phase === 'loading' || phase === 'input') && (
-        <ManualAnswerFallback
-          label="RECONSTRUCTION SERVICE UNAVAILABLE - DESCRIBE THE ARTEFACT DIRECTLY"
-          onSubmit={onSuccess}
-        />
-      )}
 
       {phase === 'loading' && (
         <div className="text-[#337DFF] font-mono text-sm tracking-widest animate-pulse">FETCHING CLASSIFIED INTEL...</div>
@@ -936,7 +1011,7 @@ function H2LoungeChallenge({ timerSeconds, onSuccess }: { timerSeconds: number; 
         </div>
       )}
 
-      {phase === 'done' && (
+      {(phase === 'roundResult' || phase === 'final') && (
         <div className="w-full space-y-6">
           <div className="flex gap-4">
             <div className="w-1/2 space-y-2 text-center">
@@ -948,12 +1023,42 @@ function H2LoungeChallenge({ timerSeconds, onSuccess }: { timerSeconds: number; 
               <img src={generated.right} alt="Generated 2" className="w-full h-64 object-cover border border-[#00FF88]/40" />
             </div>
           </div>
-          <button
-            onClick={handleValidate}
-            className="w-full border border-[#00FF88] bg-[#00FF88]/10 py-4 font-mono text-sm font-bold text-[#00FF88] tracking-[0.3em] hover:bg-[#00FF88]/20 transition-all active:scale-95"
-          >
-            SUBMIT FOR VERIFICATION
-          </button>
+
+          <div className={`border p-4 text-center font-mono ${roundPassed ? 'border-[#00FF88]/40 bg-[#00FF88]/05 text-[#00FF88]' : 'border-[#FFAA00]/40 bg-[#FFAA00]/05 text-[#FFAA00]'}`}>
+            <div className="text-[9px] tracking-[0.3em] opacity-70 mb-1">ROUND {round} MATCH SCORE</div>
+            <div className="text-2xl font-bold">{roundScore ?? '-'}/10</div>
+            <div className="text-xs tracking-widest mt-1">{roundPassed ? 'CLOSE ENOUGH TO THE TRUTH' : 'TOO FAR FROM THE ORIGINAL'}</div>
+          </div>
+
+          {phase === 'roundResult' && (
+            <button
+              onClick={handleContinue}
+              className="w-full border border-[#337DFF] bg-[#337DFF]/10 py-4 font-mono text-sm font-bold text-white tracking-[0.3em] hover:bg-[#337DFF]/20 transition-all active:scale-95"
+            >
+              PROCEED TO ROUND {round + 1} OF {totalRounds}
+            </button>
+          )}
+
+          {phase === 'final' && (
+            <div className="space-y-3">
+              <div className={`border p-4 text-center font-mono ${overallPassed ? 'border-[#00FF88]/40 bg-[#00FF88]/05 text-[#00FF88]' : 'border-[#FF3333]/40 bg-[#FF3333]/05 text-[#FF3333]'}`}>
+                <div className="text-[9px] tracking-[0.3em] opacity-70 mb-1">FINAL RESULT</div>
+                <div className="text-lg font-bold tracking-widest">
+                  {passes} OF {totalRounds} ROUNDS PASSED
+                </div>
+              </div>
+              <button
+                onClick={handleFinish}
+                className={`w-full border py-4 font-mono text-sm font-bold tracking-[0.3em] transition-all active:scale-95 ${
+                  overallPassed
+                    ? 'border-[#00FF88] bg-[#00FF88]/10 text-[#00FF88] hover:bg-[#00FF88]/20'
+                    : 'border-[#FF3333] bg-[#FF3333]/10 text-[#FF3333] hover:bg-[#FF3333]/20'
+                }`}
+              >
+                {overallPassed ? 'SUBMIT FOR VERIFICATION' : 'ACKNOWLEDGE FAILURE'}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1033,29 +1138,67 @@ function NoseDrawChallenge({ onSuccess, onFail }: { onSuccess: () => void; onFai
 // Active challenge wrapper
 // ---------------------------------------------------------------------------
 
+function GiveUpButton({ onConfirm }: { onConfirm: () => void }) {
+  const [armed, setArmed] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
+
+  const handleClick = () => {
+    if (!armed) {
+      setArmed(true)
+      timerRef.current = setTimeout(() => setArmed(false), 4000)
+      return
+    }
+    if (timerRef.current) clearTimeout(timerRef.current)
+    onConfirm()
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      className={`border px-4 py-2 font-mono text-[9px] tracking-[0.2em] transition-colors ${
+        armed
+          ? 'border-red-500 bg-red-500/10 text-red-400'
+          : 'border-red-500/30 text-red-400/60 hover:border-red-500/60 hover:text-red-400'
+      }`}
+    >
+      {armed ? 'CONFIRM GIVE UP?' : 'GIVE UP'}
+    </button>
+  )
+}
+
 function ActiveScreen({
   config,
   roomId,
   teamId,
   onSuccess,
   onFail,
+  onGiveUp,
 }: {
   config: RoomConfigData
   roomId: RoomId
   teamId: string
   onSuccess: (opts: { submission?: string; elapsedSeconds?: number }) => void
   onFail: () => void
+  onGiveUp: () => void
 }) {
   return (
     <div className="fixed inset-0 flex flex-col z-10">
       {/* Header bar */}
-      <div className="border-b border-[#337DFF]/20 px-8 py-3 flex items-center justify-between flex-shrink-0">
+      {/* pr reserves room for the fixed KioskBadge clock/terminal readout in
+          the top-right corner (top-4 right-4 z-50, present on every screen),
+          so this row's own right-aligned content does not render underneath it. */}
+      <div className="border-b border-[#337DFF]/20 pl-8 pr-64 py-3 flex items-center justify-between flex-shrink-0">
         <div>
           <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.3em] opacity-70">OPERATIVE: {teamId}</div>
           <div className="font-mono text-xs text-white tracking-widest font-bold">{config.label}</div>
         </div>
-        <div className="font-mono text-[9px] text-[#337DFF]/50 tracking-widest">
-          {config.terminalId} - ACTIVE SESSION
+        <div className="flex items-center gap-4">
+          <div className="font-mono text-[9px] text-[#337DFF]/50 tracking-widest">
+            {config.terminalId} - ACTIVE SESSION
+          </div>
+          <GiveUpButton onConfirm={onGiveUp} />
         </div>
       </div>
 
@@ -1066,14 +1209,11 @@ function ActiveScreen({
             roomId={roomId}
             timerSeconds={config.timerSeconds}
             onSuccess={elapsed => onSuccess({ elapsedSeconds: elapsed })}
-            onManualSubmit={submission => onSuccess({ submission })}
           />
         )}
         {roomId === 'CTLC_LAB' && (
           <CTLCLabChallenge
-            config={config}
             onSuccess={submission => onSuccess({ submission })}
-            onFail={onFail}
           />
         )}
         {roomId === 'MUSIC_ROOM' && (
@@ -1086,6 +1226,7 @@ function ActiveScreen({
           <H2LoungeChallenge
             timerSeconds={config.timerSeconds}
             onSuccess={submission => onSuccess({ submission: submission ?? 'FLUX_SUCCESS' })}
+            onFail={onFail}
           />
         )}
         {roomId === 'CLASSROOM_1101' && (
@@ -1118,6 +1259,8 @@ export default function App() {
   const [teamId, setTeamId] = useState('')
   const [successClue, setSuccessClue] = useState('')
   const [successPoints, setSuccessPoints] = useState(0)
+  const [gaveUp, setGaveUp] = useState(false)
+  const [nextRiddle, setNextRiddle] = useState<NextRiddlePreview | null>(null)
 
   // Fetch room config from the backend on mount
   useEffect(() => {
@@ -1137,6 +1280,8 @@ export default function App() {
     setTeamId('')
     setSuccessClue('')
     setSuccessPoints(0)
+    setGaveUp(false)
+    setNextRiddle(null)
   }
 
   const handleAuthSuccess = (id: string) => {
@@ -1153,10 +1298,14 @@ export default function App() {
       if (res.success) {
         setSuccessClue(res.clue ?? '')
         setSuccessPoints(res.points ?? 0)
+        setNextRiddle(res.nextRiddle ?? null)
         setScreen('success')
       } else {
         const next = attemptsLeft - 1
         setAttemptsLeft(next)
+        // nextRiddle is only present once the server considers the room
+        // resolved (this was the last attempt) - null on a mid-run retry.
+        if (res.nextRiddle !== undefined) setNextRiddle(res.nextRiddle ?? null)
         if (next <= 0 || res.lockout) setScreen('lockout')
         else setScreen('resolution')
       }
@@ -1171,6 +1320,7 @@ export default function App() {
       const res = await gameApi.validateTask(roomId, { submission: '__FAIL__', elapsedSeconds: 0 })
       const left = res.attemptsRemaining ?? attemptsLeft - 1
       setAttemptsLeft(left)
+      if (res.nextRiddle !== undefined) setNextRiddle(res.nextRiddle ?? null)
       if (left <= 0 || res.lockout) setScreen('lockout')
       else setScreen('resolution')
     } catch {
@@ -1179,6 +1329,25 @@ export default function App() {
       if (next <= 0) setScreen('lockout')
       else setScreen('resolution')
     }
+  }
+
+  // A crew can quit a room outright. This always registers as a fail on the
+  // server - abandon_room() stamps the visit locked_out and logs a failed
+  // answer_attempts row - so the record of pass/fail is server-side and
+  // tamper-proof either way, same as every other resolution in this app.
+  const handleGiveUp = async () => {
+    setGaveUp(true)
+    try {
+      const res = await gameApi.abandonRoom(roomId)
+      setNextRiddle(res.nextRiddle ?? null)
+    } catch {
+      // Even if the network call failed, honour the crew's choice locally so
+      // they are not stuck on a broken terminal - the server is the source of
+      // truth for scoring, and a failed abandon call still leaves the visit
+      // as in_progress there, which a game master can resolve manually.
+    }
+    setAttemptsLeft(0)
+    setScreen('lockout')
   }
 
   // Loading / error fallback
@@ -1241,6 +1410,7 @@ export default function App() {
           teamId={teamId}
           onSuccess={handleChallengeSuccess}
           onFail={handleChallengeFail}
+          onGiveUp={handleGiveUp}
         />
       )}
 
@@ -1267,6 +1437,7 @@ export default function App() {
           terminalId={terminalId}
           attemptsLeft={attemptsLeft}
           maxAttempts={maxAttempts}
+          nextRiddle={nextRiddle}
           onRetry={() => setScreen('briefing')}
           onReset={reset}
         />
@@ -1281,6 +1452,8 @@ export default function App() {
           terminalId={terminalId}
           attemptsLeft={0}
           maxAttempts={maxAttempts}
+          gaveUp={gaveUp}
+          nextRiddle={nextRiddle}
           onRetry={() => {}}
           onReset={reset}
         />

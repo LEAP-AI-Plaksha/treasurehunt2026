@@ -15,6 +15,8 @@ import { CURRENT_ROOM_ID } from '@/config/gameSettings'
 
 const ML_BASE = (import.meta.env.VITE_ML_BASE_URL as string) || '/api'
 
+import { DEMO_MODE, demoGameApi, demoPoseStreamUrl } from './demoApi'
+
 // ---------------------------------------------------------------------------
 // Response types
 // ---------------------------------------------------------------------------
@@ -55,6 +57,19 @@ export interface LoginResponse {
   totals?: RunSnapshot['totals']
 }
 
+/**
+ * The crew's next unresolved room. Null means every room on their route is
+ * done and they should return to the hub. Mirrors next_riddle_preview() in
+ * supabase/migrations/20260819000900_progressive_riddle_reveal.sql - never an
+ * answer, just the one prompt coming up next.
+ */
+export interface NextRiddlePreview {
+  roomCode: string
+  label: string
+  isFinal: boolean
+  prompt: string
+}
+
 export interface ValidateResponse {
   success: boolean
   completed?: boolean
@@ -68,6 +83,8 @@ export interface ValidateResponse {
   durationSeconds?: number
   /** True once the crew may move on - whether they solved the room or failed it. */
   resolved?: boolean
+  /** Only present once `resolved` is true - the room isn't over until then. */
+  nextRiddle?: NextRiddlePreview | null
   /**
    * The crew took their session to another terminal, so this one is stale.
    * When set, this kiosk has been signed out and should return to its idle screen.
@@ -147,7 +164,7 @@ async function accessToken(): Promise<string | null> {
 // Public API
 // ---------------------------------------------------------------------------
 
-export const gameApi = {
+const realGameApi = {
   getToken,
   getStoredTeam,
   clearToken,
@@ -310,6 +327,7 @@ export const gameApi = {
         lockout: data?.lockout ?? false,
         resolved: data?.resolved ?? false,
         attemptsRemaining: data?.attemptsRemaining ?? 0,
+        nextRiddle: data?.nextRiddle ?? null,
       }
     }
 
@@ -322,6 +340,7 @@ export const gameApi = {
       lockout: data.lockout ?? false,
       durationSeconds: data.durationSeconds ?? undefined,
       resolved: data.resolved ?? false,
+      nextRiddle: data.nextRiddle ?? null,
       message: data.correct ? 'Correct' : 'Incorrect',
     }
   },
@@ -334,6 +353,7 @@ export const gameApi = {
   async abandonRoom(roomId: string = CURRENT_ROOM_ID): Promise<{
     success: boolean; status?: string; durationSeconds?: number
     message?: string; error?: string; sessionConflict?: boolean
+    nextRiddle?: NextRiddlePreview | null
   }> {
     const { data, error } = await supabase.rpc('abandon_room', { p_room_code: roomId })
     if (error) return { success: false, error: error.message }
@@ -341,7 +361,10 @@ export const gameApi = {
       await this.logout()
       return { success: false, sessionConflict: true, error: data.error }
     }
-    return data as { success: boolean; status?: string; durationSeconds?: number; message?: string }
+    return data as {
+      success: boolean; status?: string; durationSeconds?: number
+      message?: string; nextRiddle?: NextRiddlePreview | null
+    }
   },
 
   /** Standings are operator-only (RLS hides other crews), so this returns the
@@ -361,14 +384,19 @@ export const gameApi = {
     return mlPost('/game/launch', { roomId })
   },
 
-  async getMemoryImages(): Promise<{
-    success: boolean; left?: string; right?: string; displaySeconds?: number; error?: string
+  async getMemoryImages(round: number): Promise<{
+    success: boolean; left?: string; right?: string
+    round?: number; totalRounds?: number; displaySeconds?: number; error?: string
   }> {
-    return mlPost('/memory/images', {})
+    return mlPost('/memory/images', { round })
   },
 
   async generateMemoryImages(promptLeft: string, promptRight: string): Promise<{
-    success: boolean; generatedLeft?: string; generatedRight?: string; error?: string
+    success: boolean; generatedLeft?: string; generatedRight?: string
+    round?: number; totalRounds?: number
+    roundScore?: number; roundPassed?: boolean
+    final?: boolean; overallPassed?: boolean; passes?: number
+    error?: string
   }> {
     return mlPost('/memory/generate', { promptLeft, promptRight })
   },
@@ -436,7 +464,7 @@ async function hubLogin(teamId: string): Promise<LoginResponse> {
  * short-lived (the Supabase access token expires in an hour) and scoped to
  * this one room the same way the header-based calls are.
  */
-export async function poseStreamUrl(roomId: string): Promise<string | null> {
+async function realPoseStreamUrl(roomId: string): Promise<string | null> {
   const token = await accessToken()
   if (!token) return null
   // A relative /api/... URL works directly as an <img src> too - the browser
@@ -457,3 +485,13 @@ async function mlPost<T>(path: string, body: unknown): Promise<T> {
   })
   return res.json() as Promise<T>
 }
+
+// ---------------------------------------------------------------------------
+// Demo mode switch. With VITE_DEMO_MODE unset (the default, and always in
+// production) these are the real implementations and demoApi is tree-shaken
+// out of the bundle entirely.
+// ---------------------------------------------------------------------------
+
+export const gameApi = (DEMO_MODE ? { ...realGameApi, ...demoGameApi } : realGameApi) as typeof realGameApi
+
+export const poseStreamUrl = DEMO_MODE ? demoPoseStreamUrl : realPoseStreamUrl

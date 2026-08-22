@@ -7,20 +7,24 @@
     <title>Signed, Sealed — ASL Challenge</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link
-        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap"
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap"
         rel="stylesheet">
     <style>
+        /* Kiosk terminal palette - matches the TEAM AUTHENTICATION screen.
+           Square corners, JetBrains Mono, near-black ground, blue rules. */
         :root {
-            --bg: #12142A;
-            --panel: #1B1E3D;
-            --panel-hi: #232752;
-            --line: #333868;
-            --gold: #F2B705;
-            --green: #3ECF8E;
-            --red: #FF5A5F;
-            --ink: #F5F6FA;
-            --ink-dim: #9599C0;
-            --radius: 14px;
+            --bg: #000307;
+            --panel: #0a0f1e;
+            --panel-hi: #0f1730;
+            --line: rgba(51, 125, 255, 0.4);
+            --gold: #337DFF;          /* primary accent, was gold */
+            --gold-dim: #669EFF;
+            --amber: #FFAA00;         /* reserved for in-progress / warning */
+            --green: #00FF88;
+            --red: #FF3333;
+            --ink: #FFFFFF;
+            --ink-dim: #669EFF;
+            --radius: 0px;
         }
 
         * {
@@ -34,9 +38,9 @@
         }
 
         body {
-            background: radial-gradient(circle at 20% -10%, #1c2050 0%, var(--bg) 55%);
+            background: radial-gradient(circle at 20% -10%, #071a3a 0%, var(--bg) 55%);
             color: var(--ink);
-            font-family: 'Inter', sans-serif;
+            font-family: 'JetBrains Mono', monospace;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
@@ -45,7 +49,7 @@
         }
 
         .brand .mark {
-            font-family: 'Space Grotesk', sans-serif;
+            font-family: 'JetBrains Mono', monospace;
             font-weight: 700;
             font-size: 15px;
             letter-spacing: 0.14em;
@@ -54,7 +58,7 @@
         }
 
         h1 {
-            font-family: 'Space Grotesk', sans-serif;
+            font-family: 'JetBrains Mono', monospace;
             font-weight: 700;
             font-size: clamp(28px, 5vw, 44px);
             margin: 4px 0 4px;
@@ -78,7 +82,7 @@
         .card {
             background: var(--panel);
             border: 1px solid var(--line);
-            border-radius: var(--radius);
+            border-radius: 0;
             padding: 28px;
         }
 
@@ -111,10 +115,10 @@
             width: 100%;
             background: var(--bg);
             border: 1px solid var(--line);
-            border-radius: 10px;
+            border-radius: 0;
             color: var(--ink);
             padding: 12px 14px;
-            font-family: 'Inter', sans-serif;
+            font-family: 'JetBrains Mono', monospace;
             font-size: 15px;
             resize: vertical;
         }
@@ -156,15 +160,15 @@
         }
 
         .btn {
-            font-family: 'Space Grotesk', sans-serif;
+            font-family: 'JetBrains Mono', monospace;
             font-weight: 700;
             font-size: 15px;
             border: none;
-            border-radius: 10px;
+            border-radius: 0;
             padding: 14px 22px;
             cursor: pointer;
             background: var(--gold);
-            color: #1a1200;
+            color: #000307;
             transition: transform .12s ease, box-shadow .12s ease;
         }
 
@@ -178,8 +182,8 @@
         }
 
         .btn:disabled {
-            background: #4a4630;
-            color: #8a8560;
+            background: #123059;
+            color: #669EFF;
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
@@ -199,7 +203,7 @@
         .preview-box {
             background: var(--bg);
             border: 1px solid var(--line);
-            border-radius: 12px;
+            border-radius: 0;
             padding: 16px;
             height: 100%;
         }
@@ -225,7 +229,7 @@
             font-size: 13px;
             background: var(--panel-hi);
             border: 1px solid var(--line);
-            border-radius: 6px;
+            border-radius: 0;
             min-width: 28px;
             height: 28px;
             padding: 0 4px;
@@ -235,8 +239,8 @@
         }
 
         .qletter.gesture {
-            background: rgba(242, 183, 5, 0.12);
-            border-color: var(--gold-dim, #7A6420);
+            background: rgba(51, 125, 255, 0.12);
+            border-color: var(--gold-dim);
             color: var(--gold);
         }
 
@@ -256,13 +260,13 @@
         .gbtn {
             background: var(--bg);
             border: 1px solid var(--line);
-            border-radius: 10px;
+            border-radius: 0;
             padding: 10px 4px;
             cursor: pointer;
             text-align: center;
             font-size: 11px;
             color: var(--ink);
-            font-family: 'Inter', sans-serif;
+            font-family: 'JetBrains Mono', monospace;
             transition: border-color .12s ease;
         }
 
@@ -285,9 +289,9 @@
         }
 
         .chip {
-            background: rgba(242, 183, 5, 0.12);
+            background: rgba(51, 125, 255, 0.12);
             border: 1px solid var(--gold);
-            border-radius: 20px;
+            border-radius: 0;
             padding: 4px 8px 4px 10px;
             font-size: 12px;
             display: flex;
@@ -350,7 +354,7 @@
             align-items: center;
             background: var(--panel);
             border: 1px solid var(--line);
-            border-radius: var(--radius);
+            border-radius: 0;
             padding: 14px 22px;
             margin-bottom: 18px;
         }
@@ -380,7 +384,7 @@
             margin: 0 26px;
             height: 8px;
             background: var(--bg);
-            border-radius: 6px;
+            border-radius: 0;
             overflow: hidden;
             border: 1px solid var(--line);
         }
@@ -410,7 +414,7 @@
 
         .cam-panel {
             background: #000;
-            border-radius: var(--radius);
+            border-radius: 0;
             overflow: hidden;
             position: relative;
             aspect-ratio: 4/3;
@@ -447,7 +451,7 @@
         .target-panel {
             background: var(--panel);
             border: 1px solid var(--line);
-            border-radius: var(--radius);
+            border-radius: 0;
             padding: 24px;
             display: flex;
             flex-direction: column;
@@ -502,7 +506,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-family: 'Space Grotesk', sans-serif;
+            font-family: 'JetBrains Mono', monospace;
             font-weight: 700;
             font-size: 82px;
             color: var(--ink);
@@ -552,7 +556,7 @@
             color: var(--ink-dim);
             background: var(--bg);
             border: 1px solid var(--line);
-            border-radius: 8px;
+            border-radius: 0;
             padding: 10px 12px;
             width: 100%;
             display: none;
@@ -575,7 +579,7 @@
         .results-card {
             background: var(--panel);
             border: 1px solid var(--line);
-            border-radius: var(--radius);
+            border-radius: 0;
             padding: 40px;
             text-align: center;
         }
@@ -620,7 +624,7 @@
             font-family: 'JetBrains Mono', monospace;
             font-size: 12.5px;
             padding: 6px 10px;
-            border-radius: 6px;
+            border-radius: 0;
             background: var(--bg);
             border: 1px solid var(--line);
         }
@@ -639,7 +643,7 @@
             padding: 20px;
             background: rgba(62, 207, 142, 0.1);
             border: 1px solid var(--green);
-            border-radius: var(--radius);
+            border-radius: 0;
             color: var(--ink);
             text-align: left;
         }
@@ -648,7 +652,7 @@
             color: var(--green);
             margin-top: 0;
             margin-bottom: 12px;
-            font-family: 'Space Grotesk', sans-serif;
+            font-family: 'JetBrains Mono', monospace;
             text-transform: uppercase;
             font-size: 14px;
             letter-spacing: 0.1em;
@@ -725,38 +729,9 @@
                             </select>
                         </div>
                         <div class="field">
-                            <label class="field-label" for="wordsInput">Target phrase (LOCKED)</label>
+                            <label class="field-label" for="wordsInput">Target Phrase</label>
                             <textarea id="wordsInput" spellcheck="false" readonly style="opacity:0.6;cursor:not-allowed;">frogs love rain</textarea>
                             <div class="hint">Letters are matched to fingerspelled ASL handshapes. <span class="unsupported">J, P, Q and Z</span> are skipped automatically.</div>
-                        </div>
-                        <div class="field">
-                            <label class="field-label">Add built-in gestures to the round</label>
-                            <div class="gesture-btns" id="gestureBtns"></div>
-                            <div class="chip-row" id="chipRow"></div>
-                            <div class="hint">These use Google's actual pretrained gesture model (not a geometry guess).
-                                They're
-                                appended to the end of the queue, after your spelled words. Click a chip to remove it.
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="field">
-                                <label class="field-label" for="itemTime">Time per item</label>
-                                <select id="itemTime">
-                                    <option value="5">5 seconds</option>
-                                    <option value="10">10 seconds</option>
-                                    <option value="15">15 seconds</option>
-                                    <option value="20" selected>20 seconds</option>
-                                    <option value="30">30 seconds</option>
-                                </select>
-                            </div>
-                            <div class="field">
-                                <label class="field-label" for="holdTime">Hold time to confirm</label>
-                                <select id="holdTime">
-                                    <option value="300">Fast (0.3s)</option>
-                                    <option value="500" selected>Standard (0.5s)</option>
-                                    <option value="800">Strict (0.8s)</option>
-                                </select>
-                            </div>
                         </div>
                         <button class="btn" id="startBtn" style="width: 100%;">Enable camera &amp; start round</button>
                         <div class="cam-status"><span class="dot" id="camDot"></span><span id="camStatusText">Camera not
@@ -865,16 +840,12 @@
         const resultsWrap = document.getElementById('resultsWrap');
         const teamNameInput = document.getElementById('teamName');
         const wordsInput = document.getElementById('wordsInput');
-        const itemTimeSel = document.getElementById('itemTime');
-        const holdTimeSel = document.getElementById('holdTime');
         const startBtn = document.getElementById('startBtn');
         const camDot = document.getElementById('camDot');
         const camStatusText = document.getElementById('camStatusText');
         const downloadHistoryBtn = document.getElementById('downloadHistoryBtn');
         const queuePreview = document.getElementById('queuePreview');
         const queueWarning = document.getElementById('queueWarning');
-        const gestureBtnsEl = document.getElementById('gestureBtns');
-        const chipRow = document.getElementById('chipRow');
 
         const video = document.getElementById('video');
         const overlay = document.getElementById('overlay');
@@ -912,46 +883,7 @@
         // Session History Logging
         let sessionHistoryLog = [];
 
-        const CANNED_GESTURES = [
-            { key: 'Closed_Fist', label: 'Closed Fist', emoji: '✊' },
-            { key: 'Open_Palm', label: 'Open Palm', emoji: '🖐️' },
-            { key: 'Pointing_Up', label: 'Pointing Up', emoji: '☝️' },
-            { key: 'Thumb_Down', label: 'Thumbs Down', emoji: '👎' },
-            { key: 'Thumb_Up', label: 'Thumbs Up', emoji: '👍' },
-            { key: 'Victory', label: 'Victory', emoji: '✌️' },
-            { key: 'ILoveYou', label: 'I Love You', emoji: '🤟' },
-        ];
-
-        let manualGestureQueue = []; // array of CANNED_GESTURES entries, in click order
         let leaderboard = [];
-
-        // ---------- Setup: gesture buttons ----------
-        CANNED_GESTURES.forEach(g => {
-            const btn = document.createElement('div');
-            btn.className = 'gbtn';
-            btn.innerHTML = `<span class="emoji">${g.emoji}</span>${g.label}`;
-            btn.addEventListener('click', () => {
-                manualGestureQueue.push(g);
-                renderChips();
-                renderPreview();
-            });
-            gestureBtnsEl.appendChild(btn);
-        });
-
-        function renderChips() {
-            chipRow.innerHTML = '';
-            manualGestureQueue.forEach((g, i) => {
-                const chip = document.createElement('div');
-                chip.className = 'chip';
-                chip.innerHTML = `${g.emoji} ${g.label} <span class="x">×</span>`;
-                chip.addEventListener('click', () => {
-                    manualGestureQueue.splice(i, 1);
-                    renderChips();
-                    renderPreview();
-                });
-                chipRow.appendChild(chip);
-            });
-        }
 
         // ---------- Word queue building ----------
         function buildLetterWords(raw) {
@@ -976,9 +908,6 @@
                     items.push({ type: 'letter', value: ch, contextLabel: cw.word.toUpperCase() });
                 });
             });
-            manualGestureQueue.forEach(g => {
-                items.push({ type: 'gesture', value: g.key, label: g.label, emoji: g.emoji, contextLabel: 'Quick gesture' });
-            });
             return { items, cleanWords, anyDropped };
         }
 
@@ -1001,7 +930,6 @@
             startBtn.disabled = items.length === 0;
         }
         wordsInput.addEventListener('input', renderPreview);
-        renderChips();
         renderPreview();
 
         // ---------- MediaPipe setup ----------
@@ -1138,7 +1066,7 @@
 
         function drawHand(lm) {
             octx.clearRect(0, 0, overlay.width, overlay.height);
-            octx.strokeStyle = '#F2B705';
+            octx.strokeStyle = '#337DFF';
             octx.lineWidth = 3;
             octx.lineCap = 'round';
             CONNECTIONS.forEach(([a, b]) => {
@@ -1147,7 +1075,7 @@
                 octx.lineTo(lm[b].x * overlay.width, lm[b].y * overlay.height);
                 octx.stroke();
             });
-            octx.fillStyle = '#3ECF8E';
+            octx.fillStyle = '#00FF88';
             lm.forEach(p => {
                 octx.beginPath();
                 octx.arc(p.x * overlay.width, p.y * overlay.height, 4, 0, Math.PI * 2);
@@ -1163,8 +1091,10 @@
         let passes = 0;
 
         let itemLog = [];        // {label, status}
-        let holdMs = 500;
-        let itemMs = 20000;
+        // Hardcoded round pacing - was previously a game-master picker, now
+        // fixed so every crew gets the same, more forgiving timing.
+        const holdMs = 500;   // hold a handshape this long to confirm it
+        const itemMs = 45000; // time allowed per letter/word item
         let holdProgress = 0;
         let lastFrameTime = null;
         let itemDeadline = 0;
@@ -1246,7 +1176,7 @@
                 customNote.style.display = 'block'; // Show riddle section
                 playAgainBtn.textContent = 'Next team (Reset Attempts)';
                 playAgainBtn.style.display = 'inline-block';
-                window.parent.postMessage({ type: 'HEIST_SUCCESS' }, '*');
+                window.parent.postMessage({ type: 'HEIST_SUCCESS', phrase: wordsInput.value.trim() }, '*');
             } else {
                 customNote.style.display = 'none'; // Hide riddle section
 
@@ -1356,8 +1286,6 @@
             cursor = 0;
             passes = 0;
             itemLog = [];
-            holdMs = parseInt(holdTimeSel.value, 10);
-            itemMs = parseInt(itemTimeSel.value, 10) * 1000;
 
             hudAttempts.textContent = `${currentAttempt}/${MAX_ATTEMPTS}`;
             showItem();

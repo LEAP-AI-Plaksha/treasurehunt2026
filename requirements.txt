@@ -1,0 +1,39 @@
+# =============================================================================
+# TREASURE by LEAP - A Louvre Heist :: full Python install
+# =============================================================================
+# Everything both Python services need, for a single machine that runs the
+# whole stack. Verified to resolve on Python 3.11 - 3.14 (macOS arm64).
+#
+#   python3 -m venv .venv
+#   source .venv/bin/activate
+#   pip install -r requirements.txt
+#
+# backend/requirements.txt has the same list minus the standalone
+# Memory-to-Image-Code/ app - use it if you're only running the kiosk backend.
+# =============================================================================
+
+# --- Web layer (backend/app.py, Memory-to-Image-Code/app.py) ----------------
+flask>=3.0
+flask-cors>=6.0
+python-dotenv>=1.0
+requests>=2.31
+
+# --- Crew JWT verification (backend/supabase_bridge.py) ---------------------
+# The [crypto] extra pulls `cryptography`, required to verify RS256 tokens.
+PyJWT[crypto]>=2.8
+
+# --- Imaging / arrays, shared by every module -------------------------------
+numpy>=1.26
+Pillow>=10.0
+
+# --- Pose game :: louvre_laser_game.py + hud_theme.py -----------------------
+# Lazily imported by /api/game/video_feed. Missing from the original
+# requirements files, which made the YOGA_ROOM stream fail at runtime.
+opencv-python>=4.9
+ultralytics>=8.3          # YOLO pose, loads yolov8n-pose.pt
+
+# --- CLIP / SSIM scoring :: backend/scoring.py, Memory-to-Image-Code/scoring.py
+torch>=2.2
+torchvision>=0.17
+transformers>=4.40
+scikit-image>=0.22

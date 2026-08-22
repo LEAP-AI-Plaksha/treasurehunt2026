@@ -1,11 +1,38 @@
-flask
-flask-cors
-python-dotenv
-requests
-torch
-torchvision
-transformers
-Pillow
-scikit-image
-numpy
-PyJWT[crypto]
+# =============================================================================
+# Flask ML service (backend/app.py) - the kiosks' only Python dependency
+# =============================================================================
+# Serves /api/health, /api/game/video_feed, /api/ml/report, /api/memory/images
+# and /api/memory/generate. Auth, riddles, routing and timing are Supabase's
+# job - see SUPABASE_BACKEND.md.
+#
+#   cd backend && pip install -r requirements.txt && python app.py
+#
+# torch / transformers / scikit-image ARE needed here now: scoring.py grades
+# H2_LOUNGE's reconstructions with real CLIP + SSIM + color-histogram
+# similarity (see scoring.py), so this download is genuinely ~2 GB - do it
+# well before the event, on wifi you trust.
+# =============================================================================
+
+# --- Web layer --------------------------------------------------------------
+flask>=3.0
+flask-cors>=6.0
+python-dotenv>=1.0
+requests>=2.31
+
+# --- Crew JWT verification (supabase_bridge.py) -----------------------------
+# The [crypto] extra pulls `cryptography`, required to verify RS256 tokens.
+PyJWT[crypto]>=2.8
+
+# --- Pose game, imported lazily by /api/game/video_feed ---------------------
+# ../louvre_laser_game.py -> cv2, ultralytics, numpy, PIL
+# ../hud_theme.py         -> cv2, numpy, PIL
+numpy>=1.26
+Pillow>=10.0
+opencv-python>=4.9
+ultralytics>=8.3          # YOLO pose, loads yolov8n-pose.pt
+
+# --- Memory Forgery scoring (scoring.py), used by /api/memory/generate ------
+torch>=2.2
+torchvision>=0.17
+transformers>=4.40
+scikit-image>=0.22

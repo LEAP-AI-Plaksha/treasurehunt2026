@@ -39,38 +39,38 @@ values
   ('YOGA_ROOM', 'game', 0, 'LASER GRID', 'ALPHA-01', 5173,
    '{"lat": "48.8606 N", "lng": "2.3376 E"}'::jsonb,
    'The Louvre east wing laser grid pulses at irregular intervals. Your team must hold the deactivation pose without breaking contact. Moving out of frame trips the alarm.',
-   'PLACEHOLDER HINT: the answer is a single word.',
+   '',
    150, 10, 3, false),
 
   ('CTLC_LAB', 'game', 1, 'SILENT RELAY', 'BETA-02', 5174,
    '{"lat": "48.8608 N", "lng": "2.3364 E"}'::jsonb,
    'The guard rotation has been intercepted. A silent channel is open to your inside contact. The target phrase must be relayed without speaking - recognition microphones are live.',
-   'PLACEHOLDER HINT: the answer is a two word phrase.',
+   '',
    120, 5, 3, false),
 
   ('MUSIC_ROOM', 'game', 2, 'VOICE INTERCEPT', 'GAMMA-03', 5175,
    '{"lat": "48.8612 N", "lng": "2.3352 E"}'::jsonb,
    'An intercepted transmission is incoming on the guard frequency. Decide whether the voice on the channel belongs to a human guard or an AI decoy before you answer.',
-   'PLACEHOLDER HINT: two possible answers, pick one.',
+   '',
    130, 30, 3, false),
 
   ('H2_LOUNGE', 'game', 3, 'MEMORY FORGERY', 'DELTA-04', 5176,
    '{"lat": "48.8619 N", "lng": "2.3341 E"}'::jsonb,
    'Your asset photographed the target artefact. The classified image self-destructs on a timer. Study every detail, then reconstruct it for the forger.',
-   'PLACEHOLDER HINT: name the material.',
+   '',
    140, 10, 3, false),
 
   ('NOSE_DRAW', 'game', 4, 'BIOMETRIC SKETCH', 'ZETA-06', 5178,
    '{"lat": "48.8625 N", "lng": "2.3329 E"}'::jsonb,
    'A biometric scanner wants a sketch of the guard captain, drawn without using your hands. Unconventional, but it stays clear of the cameras watching for motion.',
-   'PLACEHOLDER HINT: name the body part you drew with.',
+   '',
    100, 300, 3, false),
 
   -- The finale. Every crew ends here, so it is not part of any path.
   ('CLASSROOM_1101', 'final', null, 'NEURAL BYPASS', 'EPSILON-05', 5177,
    '{"lat": "48.8621 N", "lng": "2.3338 E"}'::jsonb,
    'Last stand. The museum neural authentication system must be bypassed before extraction. Your cryptographer has isolated the vulnerable weights layer - backtrack through it and submit the injection signature.',
-   'PLACEHOLDER HINT: four numbers, comma separated.',
+   '',
    160, 120, 3, false)
 on conflict (code) do update set
   kind          = excluded.kind,
@@ -99,8 +99,8 @@ with seed(room_code, prompt, answer, alternates, clue) as (
      'CLUE: The Mona Lisa hangs 47 paces north. The third panel from the left conceals the keycard.'),
 
     ('CTLC_LAB',
-     'PLACEHOLDER RIDDLE - SILENT RELAY: Two words were spoken on a dead channel. The first is a huntress, the second is a rule that binds. Say them back.',
-     'artemis protocol', array['artemis protocol seven']::text[],
+     'PLACEHOLDER RIDDLE - SILENT RELAY: Your inside contact just signed a phrase on the silent channel. The room already grades this for you the moment you sign it correctly - nothing to type here.',
+     'frogs love rain', array[]::text[],
      'CLUE: Access Level 4 requires a vocal signature. The audio file has been uploaded to terminal H2-LOUNGE.'),
 
     ('MUSIC_ROOM',

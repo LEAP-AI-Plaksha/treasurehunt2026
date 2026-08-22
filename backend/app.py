@@ -15,12 +15,8 @@ directly for those. See SUPABASE_BACKEND.md.
 
 import os
 import json
-import time
 import uuid
 import base64
-import random
-from datetime import datetime, timezone
-from functools import wraps
 
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -61,12 +57,31 @@ CORS(
 # In-memory state
 # ---------------------------------------------------------------------------
 
-# Memory-to-Image room: team_code -> { image_set, generated_left, generated_right }
+# Memory Forgery room (H2_LOUNGE): team_code -> {
+#   round: current round number (1-based),
+#   original_paths: {"left": path, "right": path} for the round in progress,
+#   rounds: [{round, leftScore, rightScore, roundScore, passed}, ...] so far,
+# }
 # Keyed by team rather than by token: Supabase refreshes access tokens during a
 # run, so the token is not a stable identifier for a crew.
 IMAGE_SESSIONS: dict[str, dict] = {}
 
 os.makedirs(os.path.join(os.path.dirname(__file__), "static", "generated"), exist_ok=True)
+os.makedirs(os.path.join(os.path.dirname(__file__), "static", "images", "online"), exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# Memory Forgery room tuning
+# ---------------------------------------------------------------------------
+# Three memorise-and-reconstruct rounds per attempt, two fresh online photos
+# each (six photos total). A round passes at MEMORY_PASS_SCORE or above on
+# scoring.compute_combined_score()'s 0-10 scale (CLIP content + SSIM structure
+# + color histogram); the room passes once MEMORY_ROUND_MIN_PASSES rounds have
+# cleared that bar. There is no rehearsal data to calibrate against yet -
+# retune both constants after a dry run if crews are sailing through or
+# nobody is passing.
+MEMORY_TOTAL_ROUNDS = 3
+MEMORY_PASS_SCORE = 5
+MEMORY_ROUND_MIN_PASSES = 2
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -168,31 +183,62 @@ def ml_report(team_id: str):
 # Routes - Memory-to-Image room (H2 Lounge) - image generation pipeline
 # ---------------------------------------------------------------------------
 
+def _fetch_random_online_photo(dest_path: str, timeout: int = 15) -> None:
+    """Download one real, freely-licensed photo from Lorem Picsum.
+
+    A fresh cache-busting query param on every call is required - picsum.photos
+    caches by URL, so a repeated URL returns the same cached photo instead of a
+    new random one.
+    """
+    url = f"https://picsum.photos/800/600?random={uuid.uuid4().hex}"
+    resp = http_requests.get(url, timeout=timeout)
+    resp.raise_for_status()
+    with open(dest_path, "wb") as fh:
+        fh.write(resp.content)
+
+
 @app.route("/api/memory/images", methods=["POST"])
 @require_team_jwt
 def memory_images(team_id: str):
-    """Pick a random image pair for the memory phase."""
-    image_dir = os.path.join(os.path.dirname(__file__), "static", "images")
-    if not os.path.exists(image_dir):
-        return jsonify({"success": False, "error": "Image directory not found"}), 500
+    """Fetch a fresh pair of random online photos for one memorise round.
 
-    exts = (".jpg", ".jpeg", ".png")
-    pool = [
-        f for f in os.listdir(image_dir)
-        if f.lower().endswith(exts)
-    ]
-    if len(pool) < 2:
-        return jsonify({"success": False, "error": "Need at least 2 images in static/images"}), 500
+    Three rounds per attempt (MEMORY_TOTAL_ROUNDS), two photos each - six
+    freshly-sourced photos in total, never reused within a session. Round 1
+    starts a new session and discards any previous one; the crew's browser
+    drives which round this is, same as every other multi-step room here.
+    """
+    data = request.get_json(silent=True) or {}
+    round_num = data.get("round", 1)
+    if not isinstance(round_num, int) or not (1 <= round_num <= MEMORY_TOTAL_ROUNDS):
+        return jsonify({"success": False, "error": f"round must be 1-{MEMORY_TOTAL_ROUNDS}"}), 400
 
-    pair = random.sample(pool, 2)
-    image_set = {"left": pair[0], "right": pair[1]}
+    if round_num == 1:
+        IMAGE_SESSIONS[team_id] = {"round": 1, "rounds": []}
 
-    IMAGE_SESSIONS[team_id] = {"image_set": image_set}
+    session = IMAGE_SESSIONS.get(team_id)
+    if not session or len(session.get("rounds", [])) != round_num - 1:
+        return jsonify({"success": False, "error": "Round out of sequence - start again from round 1"}), 400
+
+    image_dir = os.path.join(os.path.dirname(__file__), "static", "images", "online")
+    paths = {}
+    try:
+        for side in ("left", "right"):
+            filename = f"{team_id}_{round_num}_{side}_{uuid.uuid4().hex[:8]}.jpg"
+            dest = os.path.join(image_dir, filename)
+            _fetch_random_online_photo(dest)
+            paths[side] = dest
+    except Exception as exc:
+        return jsonify({"success": False, "error": f"Could not fetch a photo online: {exc}"}), 502
+
+    session["round"] = round_num
+    session["original_paths"] = paths
 
     return jsonify({
         "success": True,
-        "left": f"/static/images/{pair[0]}",
-        "right": f"/static/images/{pair[1]}",
+        "left": f"/static/images/online/{os.path.basename(paths['left'])}",
+        "right": f"/static/images/online/{os.path.basename(paths['right'])}",
+        "round": round_num,
+        "totalRounds": MEMORY_TOTAL_ROUNDS,
         # Read from Supabase so the timer is not maintained in two places.
         "displaySeconds": _room_timer_seconds("H2_LOUNGE", fallback=10),
     })
@@ -289,16 +335,24 @@ def call_cloudflare_image_generation(prompt: str, timeout: int = 40) -> str:
 @app.route("/api/memory/generate", methods=["POST"])
 @require_team_jwt
 def memory_generate(team_id: str):
-    """Generate images from team descriptions using Cloudflare Workers AI."""
+    """Generate this round's reconstructions and grade them against the originals.
+
+    Scores each side with scoring.compute_combined_score() (CLIP content + SSIM
+    structure + color histogram, 0-10). A round passes at MEMORY_PASS_SCORE or
+    above; the room passes once MEMORY_ROUND_MIN_PASSES rounds have. The CLIP
+    model is imported lazily here, same reason the pose model is lazy in
+    /api/game/video_feed: it should not slow down every other room's requests.
+    """
     session = IMAGE_SESSIONS.get(team_id)
-    if not session:
-        return jsonify({"success": False, "error": "No active memory session"}), 400
+    if not session or "original_paths" not in session:
+        return jsonify({"success": False, "error": "No active memory session - fetch images first"}), 400
 
     data = request.get_json(silent=True) or {}
     prompt_left = data.get("promptLeft", "").strip() or "a random abstract colorful image"
     prompt_right = data.get("promptRight", "").strip() or "a random abstract colorful image"
 
     generated = {}
+    generated_paths = {}
     for side, prompt in [("left", prompt_left), ("right", prompt_right)]:
         try:
             img_b64 = call_cloudflare_image_generation(prompt=prompt, timeout=40)
@@ -308,17 +362,54 @@ def memory_generate(team_id: str):
                 fh.write(base64.b64decode(img_b64))
 
             generated[side] = f"/static/generated/{filename}"
+            generated_paths[side] = save_path
         except Exception as exc:
             return jsonify({"success": False, "error": f"Generation error ({side}): {str(exc)}"}), 502
 
-    session["generated_left"] = generated["left"]
-    session["generated_right"] = generated["right"]
+    import scoring
+    original_paths = session["original_paths"]
+    left_score = scoring.compute_combined_score(original_paths["left"], generated_paths["left"])
+    right_score = scoring.compute_combined_score(original_paths["right"], generated_paths["right"])
+    round_score = round((left_score["score"] + right_score["score"]) / 2, 1)
+    round_passed = round_score >= MEMORY_PASS_SCORE
 
-    return jsonify({
+    round_num = session["round"]
+    session["rounds"].append({
+        "round": round_num,
+        "leftScore": left_score["score"],
+        "rightScore": right_score["score"],
+        "roundScore": round_score,
+        "passed": round_passed,
+    })
+
+    response = {
         "success": True,
         "generatedLeft": generated["left"],
-        "generatedRight": generated["right"]
-    })
+        "generatedRight": generated["right"],
+        "round": round_num,
+        "totalRounds": MEMORY_TOTAL_ROUNDS,
+        "roundScore": round_score,
+        "roundPassed": round_passed,
+        "final": round_num >= MEMORY_TOTAL_ROUNDS,
+    }
+
+    if round_num >= MEMORY_TOTAL_ROUNDS:
+        passes = sum(1 for r in session["rounds"] if r["passed"])
+        overall_passed = passes >= MEMORY_ROUND_MIN_PASSES
+        try:
+            room_result = record_ml_result(
+                team_id, "H2_LOUNGE", overall_passed,
+                detail={"rounds": session["rounds"], "passes": passes},
+            )
+        except Exception as exc:
+            return jsonify({"success": False, "error": f"Could not record result: {exc}"}), 502
+
+        response["overallPassed"] = overall_passed
+        response["passes"] = passes
+        response["roomResult"] = room_result
+        IMAGE_SESSIONS.pop(team_id, None)
+
+    return jsonify(response)
 
 
 
@@ -327,7 +418,7 @@ def memory_generate(team_id: str):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
+    port = int(os.getenv("PORT", 4000))
     host = os.getenv("HOST", "0.0.0.0")
     debug = os.getenv("FLASK_ENV", "development") == "development"
     print(f"[*] Heist backend starting on http://{host}:{port}")
@@ -337,4 +428,4 @@ if __name__ == "__main__":
     # POST back into this same process to report a win. On a single-threaded
     # dev server that self-call would block waiting for a worker that is the
     # one and only worker, currently busy serving the still-open stream.
-    app.run(host=host, port=port, debug=debug, threaded=True)
+    app.run(host=host, port=4000, debug=debug, threaded=True)
