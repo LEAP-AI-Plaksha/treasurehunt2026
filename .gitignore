@@ -110,3 +110,9 @@ supabase/functions/.env
 
 # Generated credential sheet - the one real secret in this repo.
 team-credentials.txt
+
+# Runtime artefacts from the Memory Forgery room: photos fetched from the
+# internet per round, and the images Cloudflare generates from crew
+# descriptions. Written by backend/app.py at play time, never source.
+backend/static/generated/
+backend/static/images/online/
