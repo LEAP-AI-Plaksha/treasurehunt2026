@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import imgBackground from '@/imports/LaserGrid/73ecf9f6066a41d6d2daab627902dcec860f5ac3.png'
 import { gameApi, poseStreamUrl, type RoomConfigData, type NextRiddlePreview } from '@/services/api'
-import { CURRENT_ROOM_ID, DEFAULT_MAX_ATTEMPTS, ROOM_LABELS, type RoomId } from '@/config/gameSettings'
+import { CURRENT_ROOM_ID, DEFAULT_MAX_ATTEMPTS, IS_HUB, ROOM_LABELS, type RoomId } from '@/config/gameSettings'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -350,26 +350,55 @@ function BriefingScreen({ config, teamId, onStart }: { config: RoomConfigData; t
 // never on a mid-run retry, since the server itself withholds nextRiddle
 // until then. `undefined` (not yet known) renders nothing; `null` means the
 // crew has cleared every room on their route.
+// The riddle sending a crew to their next room is the one thing on this screen
+// that they have to read, discuss and act on, often standing back from the
+// kiosk - so it is the centerpiece rather than a footnote. It used to render at
+// text-xs in a small panel below the result banner, which is unreadable at more
+// than arm's length.
 function NextRoomPreview({ nextRiddle }: { nextRiddle?: NextRiddlePreview | null }) {
   if (nextRiddle === undefined) return null
 
   if (nextRiddle === null) {
     return (
-      <div className="border border-[#337DFF]/40 bg-[#337DFF]/05 p-6 mb-8 text-left">
-        <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.3em] mb-2 opacity-70">ROUTE CLEARED</div>
-        <p className="font-mono text-sm text-white tracking-wide">Return to the hub to check out.</p>
+      <div className="border-2 border-[#337DFF]/50 bg-[#337DFF]/05 px-6 py-8 mb-6 text-center">
+        <div className="font-mono text-[10px] text-[#337DFF] tracking-[0.4em] mb-3 opacity-80">ROUTE CLEARED</div>
+        <p className="font-mono text-[clamp(1rem,2.6vh,1.8rem)] text-white tracking-wide leading-snug">
+          All rooms resolved. Return to the operations base.
+        </p>
       </div>
     )
   }
 
   return (
-    <div className="border border-[#337DFF]/40 bg-[#337DFF]/05 p-6 mb-8 text-left">
-      <div className="font-mono text-[9px] text-[#337DFF] tracking-[0.3em] mb-2 opacity-70">
-        NEXT ROOM{nextRiddle.isFinal ? ' - FINAL' : ''}
+    <div className="border-2 border-[#337DFF]/60 bg-[#337DFF]/08 px-6 py-6 md:px-10 md:py-8 mb-6 text-left shadow-[0_0_40px_rgba(51,125,255,0.15)]">
+      <div className="font-mono text-[10px] text-[#337DFF] tracking-[0.4em] opacity-80 mb-4">
+        YOUR NEXT RIDDLE{nextRiddle.isFinal ? ' - FINAL ROOM' : ''}
       </div>
-      <div className="font-mono text-sm text-white font-bold tracking-widest mb-3">{nextRiddle.label}</div>
-      <div className="w-full h-px bg-[#337DFF]/20 mb-3" />
-      <p className="font-mono text-xs text-[#aabddd] leading-relaxed">{nextRiddle.prompt}</p>
+
+      {/* The riddle itself - the one thing on this screen a crew reads together
+          and acts on, so it is the largest text here.
+
+          whitespace-pre-line is load-bearing: the riddles are verse, around
+          eight lines, and their newlines come straight from the database. HTML
+          collapses those into one wrapped paragraph without it, which turns a
+          shaped riddle into a blob.
+
+          The size is tied to viewport HEIGHT rather than a md: breakpoint,
+          because the binding constraint is fitting eight lines on the kiosk
+          screen alongside the rest of this panel - not how wide the screen is.
+          At 2.6vh with 1.45 leading, eight lines occupy roughly 30vh: about
+          270px on a 900px laptop panel, 325px on a 1080p screen. The rem bounds
+          stop it collapsing on a very short window or ballooning on a TV. */}
+      <p className="font-mono text-[clamp(1rem,2.6vh,1.8rem)] leading-[1.45] text-white tracking-wide whitespace-pre-line">
+        {nextRiddle.prompt}
+      </p>
+
+      <div className="w-full h-px bg-[#337DFF]/25 my-6" />
+
+      <div className="font-mono text-[10px] text-[#669EFF]/70 tracking-[0.3em] mb-2">SOLVE IT TO FIND</div>
+      <div className="font-mono text-[clamp(0.95rem,2vh,1.4rem)] text-[#00FF88] font-bold tracking-[0.2em]">
+        {nextRiddle.label}
+      </div>
     </div>
   )
 }
@@ -399,21 +428,21 @@ function ResolutionScreen({
 }) {
   if (!success && attemptsLeft === 0) {
     return (
-      <div className="fixed inset-0 flex flex-col items-center justify-center z-10">
-        <div className="text-center max-w-xl mx-8">
-          <div className="font-digital text-8xl text-red-500 mb-4">000</div>
+      <div className="fixed inset-0 flex flex-col items-center justify-center z-10 overflow-y-auto pt-28 pb-8">
+        <div className="text-center max-w-4xl w-full mx-8">
+          <div className="font-digital text-[clamp(2.5rem,8vh,5rem)] leading-none text-red-500 mb-3">000</div>
           <div className="font-mono text-[9px] tracking-[0.4em] text-red-400 mb-6 opacity-70">
             {gaveUp ? 'ROOM ABANDONED' : 'TERMINAL LOCKOUT'}
           </div>
-          <h2 className="text-3xl font-black text-white mb-4 tracking-wide">
+          <h2 className="text-2xl font-black text-white mb-3 tracking-wide">
             {gaveUp ? 'OPERATION ABORTED' : 'OPERATION COMPROMISED'}
           </h2>
-          <p className="text-[#aabddd] text-sm mb-8 font-light leading-relaxed">
+          <p className="text-[#aabddd] text-sm mb-5 font-light leading-relaxed">
             {gaveUp
               ? 'Your crew withdrew from this room. The attempt is recorded as a fail - proceed to your next room.'
               : 'All authentication attempts exhausted. This terminal has been locked. Alert the game master for manual override.'}
           </p>
-          <div className="border border-red-500/30 bg-red-500/05 px-6 py-4 mb-8 font-mono text-xs text-red-400/70 tracking-widest">
+          <div className="border border-red-500/30 bg-red-500/05 px-6 py-3 mb-5 font-mono text-xs text-red-400/70 tracking-widest">
             TERMINAL {terminalId} - {gaveUp ? 'ABANDONED' : 'LOCKED'} - TEAM: {teamId}
           </div>
           <NextRoomPreview nextRiddle={nextRiddle} />
@@ -430,8 +459,8 @@ function ResolutionScreen({
 
   if (!success) {
     return (
-      <div className="fixed inset-0 flex flex-col items-center justify-center z-10">
-        <div className="text-center max-w-xl mx-8">
+      <div className="fixed inset-0 flex flex-col items-center justify-center z-10 overflow-y-auto pt-28 pb-8">
+        <div className="text-center max-w-4xl w-full mx-8">
           <div className="font-digital text-8xl text-amber-500 mb-4">
             {'0'.repeat(maxAttempts).split('').map((_, i) => i < attemptsLeft ? '●' : '○').join('')}
           </div>
@@ -452,23 +481,27 @@ function ResolutionScreen({
   }
 
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-center z-10">
-      <div className="max-w-2xl w-full mx-8">
-        <div className="text-center mb-8">
-          <div className="font-digital text-7xl text-[#00FF88] mb-2">ACCESS</div>
-          <div className="font-digital text-7xl text-[#00FF88]">GRANTED</div>
+    <div className="fixed inset-0 flex flex-col items-center justify-center z-10 overflow-y-auto pt-28 pb-8">
+      <div className="max-w-4xl w-full mx-8">
+        <div className="text-center mb-5">
+          {/* Sized to stay clear of the fixed KioskBadge in the top-right
+              corner: the digital face is wide, and at 7vh this ran underneath
+              the badge on a 1440x900 panel. */}
+          <div className="font-digital text-[clamp(1.75rem,5vh,3.25rem)] leading-none text-[#00FF88]">
+            ACCESS GRANTED
+          </div>
         </div>
 
-        <div className="border border-[#00FF88]/40 bg-[#00FF88]/05 p-8">
-          <div className="font-mono text-[9px] text-[#00FF88] tracking-[0.3em] mb-4 opacity-70">
+        <div className="border border-[#00FF88]/40 bg-[#00FF88]/05 px-6 py-4">
+          <div className="font-mono text-[9px] text-[#00FF88] tracking-[0.3em] mb-2 opacity-70">
             CHALLENGE CLEARED - OPERATIVE: {teamId}
           </div>
-          <div className="w-full h-px bg-[#00FF88]/20 mb-4" />
-          <div className="font-mono text-[9px] text-[#00FF88] tracking-[0.3em] mb-2 opacity-60">CLASSIFIED CLUE</div>
-          <p className="font-mono text-sm text-white leading-relaxed tracking-wide">{clue}</p>
+          {clue ? (
+            <p className="font-mono text-sm text-white leading-relaxed tracking-wide">{clue}</p>
+          ) : null}
         </div>
 
-        <div className="mt-6">
+        <div className="mt-5">
           <NextRoomPreview nextRiddle={nextRiddle} />
         </div>
 
@@ -1376,6 +1409,43 @@ function GiveUpButton({ onConfirm }: { onConfirm: () => void }) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Operations base (HUB)
+// ---------------------------------------------------------------------------
+// The hub does not authenticate anyone. Crews are handed their team code,
+// passcode and first riddle by hand here, and the run's clock starts when they
+// sign in at their first ROOM - not here. So this terminal is a sign, not a
+// kiosk: it deliberately has no team-code prompt to mistype into.
+function HubScreen({ label, terminalId }: { label: string; terminalId: string }) {
+  return (
+    <div className="fixed inset-0 flex flex-col items-center justify-center z-10 overflow-y-auto pt-28 pb-8">
+      <div className="max-w-3xl w-full mx-8 text-center">
+        <div className="font-mono text-[10px] text-[#337DFF] tracking-[0.4em] opacity-70 mb-3">
+          {terminalId} - OPERATIONS BASE
+        </div>
+        <h1 className="text-4xl md:text-5xl font-black text-white tracking-widest mb-8">{label}</h1>
+
+        <div className="border-2 border-[#337DFF]/50 bg-[#337DFF]/05 px-8 py-10 text-left">
+          <div className="font-mono text-[11px] text-[#337DFF] tracking-[0.4em] mb-5 opacity-80">
+            BRIEFING PROCEDURE
+          </div>
+          <ol className="font-mono text-lg md:text-xl text-white leading-relaxed space-y-3 list-decimal list-inside">
+            <li>Hand the crew their team code and passcode.</li>
+            <li>Hand them their first riddle on paper.</li>
+            <li>Send them off - their clock starts when they sign in at that room.</li>
+          </ol>
+          <div className="w-full h-px bg-[#337DFF]/25 my-7" />
+          <p className="font-mono text-sm text-[#aabddd] leading-relaxed">
+            No sign-in happens at this terminal. Standings and per-room times are
+            read with the operator CLI:
+            <span className="text-[#00FF88]"> node scripts/operator.mjs leaderboard</span>.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ActiveScreen({
   config,
   roomId,
@@ -1561,6 +1631,23 @@ export default function App() {
     }
     setAttemptsLeft(0)
     setScreen('lockout')
+  }
+
+  // The hub is not a playable terminal and never signs a crew in, so it short
+  // circuits the whole idle -> auth -> challenge machine below. Its labels come
+  // from the local room table rather than roomConfig, so the briefing board
+  // still reads correctly even when the backend is unreachable.
+  if (IS_HUB) {
+    const hubLabel = roomConfig?.label ?? ROOM_LABELS[roomId]
+    const hubTerminal = roomConfig?.terminalId ?? roomId
+    return (
+      <div className="fixed inset-0 bg-[#000307] overflow-hidden">
+        <BackgroundLayer />
+        <ScanlineOverlay />
+        <KioskBadge label={hubLabel} terminalId={hubTerminal} />
+        <HubScreen label={hubLabel} terminalId={hubTerminal} />
+      </div>
+    )
   }
 
   // Loading / error fallback
